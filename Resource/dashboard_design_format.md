@@ -7,7 +7,8 @@ Mục tiêu: thống nhất thiết kế, thống nhất logic dữ liệu, trá
 
 Nguồn dữ liệu cho dashboard phải là file sạch đã export ở cuối pipeline:
 
-- `../data/cleaned/Air_Quality_HCMC_Cleaned.csv`
+- `../Excel/Air_Quality_HCMC_Cleaned.csv` (nguồn đang dùng hiện tại)
+- Có thể dùng bản mirror ở thư mục khác nếu cùng schema và cùng logic làm sạch.
 
 Schema chuẩn đang dùng để vẽ dashboard:
 
@@ -20,6 +21,7 @@ Quy tắc bắt buộc:
 - Không dùng lại cột `date` gốc trong dashboard.
 - Không tự tạo lại logic làm sạch khác notebook nếu chưa thống nhất nhóm.
 - Mọi biểu đồ phải bám schema trên.
+- Nếu cần dùng `DayOfWeek` cho heatmap, phải tạo từ `Date` theo một quy tắc thống nhất cho cả nhóm.
 
 ## 2. Data assumptions cần ghi chú trên dashboard
 
@@ -46,31 +48,54 @@ Dashboard phải trả lời rõ 5 câu hỏi sau:
 
 ## 4. Visual identity (màu, chữ, bố cục)
 
+## 4.0 Nguồn tham khảo visual đề xuất
+
+Theme tổng thể nên bám theo phong cách dashboard chất lượng không khí và môi trường đô thị của các trang dữ liệu lớn, ưu tiên cảm giác sạch, có hệ thống, dễ đọc và có sắc thái cảnh báo rõ ràng:
+
+- [AirNow (U.S. EPA)](https://www.airnow.gov/)
+- [IQAir](https://www.iqair.com/)
+- [World Air Quality Index (WAQI)](https://waqi.info/)
+- [OpenAQ](https://openaq.org/)
+
+Nguyên tắc lấy cảm hứng:
+
+- Nền sáng, nhẹ, ít bão hòa để giữ độ đọc tốt cho dữ liệu dày.
+- Màu chủ đạo nên đi theo nhóm không khí sạch, ô nhiễm, cảnh báo, khí tượng.
+- Các chart của cùng một biến phải giữ đúng một màu xuyên suốt, không đổi palette theo từng visual.
+- Chỉ dùng màu gắt cho cảnh báo hoặc nhấn mạnh, không lạm dụng.
+
 ## 4.1 Theme cơ bản
 
-- Canvas background: `#F4F7FB`
+- Canvas background: `#F4F8FB`
 - Card background: `#FFFFFF`
-- Border: `#D8E1EB`
-- Text chính: `#102A43`
-- Text phụ: `#486581`
-- Gridline: `#E6EDF4`
+- Border: `#D9E4EC`
+- Text chính: `#16324F`
+- Text phụ: `#4F6B7A`
+- Gridline: `#E5EEF3`
+
+Gợi ý xử lý nền nếu cần tạo bản visual mockup:
+
+- Có thể dùng nền gradient rất nhẹ từ `#F4F8FB` sang `#EEF4F8`.
+- Tránh nền tối vì làm mất cảm giác sạch và gây nặng cho dữ liệu dày.
 
 ## 4.2 Color mapping cố định theo biến
 
-- PM2.5: `#C0392B`
-- TSP: `#7F1D1D`
-- O3: `#1B9E77`
-- CO: `#5E548E`
-- NO2: `#F39C12`
-- SO2: `#2E86AB`
-- Temperature: `#E76F51`
-- Humidity: `#3A86FF`
+- PM2.5: `#B23A2F`
+- TSP: `#6F1D1B`
+- O3: `#1F8A70`
+- CO: `#4E5D8A`
+- NO2: `#D98E04`
+- SO2: `#2B7BBB`
+- Temperature: `#D65A31`
+- Humidity: `#2F80ED`
 
 Quy tắc:
 
 - Một biến chỉ có đúng một màu trong mọi page.
 - Không dùng random palette theo chart.
 - Khi highlight, chỉ dùng 1 màu nhấn `#FFB703`.
+- Màu nhiệt độ và độ ẩm nên đứng trên cùng hệ màu khí tượng, vì chúng là biến giải thích cho chất lượng không khí chứ không phải biến chính của dashboard.
+- Màu của pollutant nên đủ khác nhau để dùng trên line chart, dot plot và heatmap mà không bị lẫn.
 
 ## 4.3 Typography
 
@@ -87,7 +112,7 @@ Khuyến nghị 5 trang chính, đặt tên cố định:
 1. `P01_Overview`
 2. `P02_Time_Pattern`
 3. `P03_Station_Comparison`
-4. `P04_Weather_Impact`
+4. `P04_Meteorological_Impact`
 5. `P05_Correlation_Insights`
 
 Khung bố cục mỗi trang:
@@ -115,7 +140,7 @@ Không được:
 - Dot plot xếp hạng trạm cho PM2.5 và TSP.
 - Bắt buộc sort giảm dần theo giá trị chính.
 
-## 6.3 Weather Impact
+## 6.3 Meteorological Impact
 
 - Scatter: `Temperature` vs `O3` (có trendline).
 - Scatter: `Humidity` vs `PM2.5` (có trendline).
@@ -182,7 +207,7 @@ Interaction rules:
 - Member B: Theme, KPI cards, layout system
 - Member C: `P02_Time_Pattern`
 - Member D: `P03_Station_Comparison`
-- Member E: `P04_Weather_Impact` + `P05_Correlation_Insights`
+- Member E: `P04_Meteorological_Impact` + `P05_Correlation_Insights`
 
 ## 10.2 Quy tắc làm việc
 
