@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import pydeck as pdk
 
 # ============= PAGE CONFIG =============
 st.set_page_config(
-    page_title="Spatial Distribution - HCMC Air Quality",
+    page_title="Phân Phối Không Gian - HCMC Air Quality",
     page_icon="🗺️",
     layout="wide"
 )
@@ -37,6 +36,7 @@ except Exception as e:
     st.stop()
 
 st.title("🗺️ Phân Bố Không Gian Ô Nhiễm Không Khí TPHCM")
+st.markdown("*Phân tích sự khác biệt nồng độ ô nhiễm giữa các khu vực đặc trưng*")
 st.markdown("---")
 
 # ============= MAIN FILTERS =============
@@ -53,7 +53,7 @@ with st.expander("🎛️ BỘ LỌC VÀ TÙY CHỈNH DỮ LIỆU (Filters & Con
             max_value=date_max
         )
         pollutants = ['PM2.5', 'TSP', 'O3', 'CO', 'NO2', 'SO2']
-        focus_pollutant = st.selectbox("🎯 Chất ô nhiễm", options=pollutants, index=0)
+        focus_pollutant = st.selectbox("🎯 Chất ô nhiễm chính", options=pollutants, index=0)
         
     with col2:
         station_opts = [f"Trạm {r['Station_No']} - {r['Location']}" for _, r in stations_meta.iterrows()]
@@ -64,6 +64,7 @@ with st.expander("🎛️ BỘ LỌC VÀ TÙY CHỈNH DỮ LIỆU (Filters & Con
         )
         selected_station_ids = [int(s.split(" ")[1]) for s in selected_stations_raw]
         
+        # Consistent threshold based on pollutant
         threshold_vals = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 40.0}
         threshold = st.number_input(f"Ngưỡng WHO (µg/m³)", value=threshold_vals.get(focus_pollutant, 50.0))
         
@@ -89,6 +90,7 @@ df_filtered = df_filtered[
     (df_filtered['Region'].isin(selected_regions))
 ]
 
+# Apply data cleaning flag check
 flag_col = f"{focus_pollutant}_flag"
 if flag_col in df_filtered.columns:
     df_filtered = df_filtered[df_filtered[flag_col] == 0]
@@ -96,15 +98,68 @@ if flag_col in df_filtered.columns:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ============= LAYER 2: SPATIAL OVERVIEW =============
-col_map, col_kpi = st.columns([6, 4])
-
 if df_filtered.empty:
     st.warning("Không có dữ liệu thỏa mãn bộ lọc hiện tại.")
     st.stop()
 
+# Aggregates for Map
 map_data = df_filtered.groupby(['Station_No', 'Location', 'Lat', 'Lon', 'Region'])[focus_pollutant].mean().reset_index()
-# Handle NaN gracefully
 map_data = map_data.dropna(subset=[focus_pollutant])
+
+# KPI CARDS SECTION (5 cards as per proposal.md)
+kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+
+with kpi1:
+    worst_station = map_data.loc[map_data[focus_pollutant].idxmax()]
+    st.metric(
+        label=f"🏭 Trạm cao nhất ({focus_pollutant})",
+        value=f"Trạm {worst_station['Station_No']}",
+        delta=f"{worst_station[focus_pollutant]:.1f} µg/m³",
+        delta_color="inverse"
+    )
+
+with kpi2:
+    # Max TSP across all filtered stations
+    df_tsp = df_filtered[df_filtered['TSP_flag'] == 0] if 'TSP_flag' in df_filtered.columns else df_filtered
+    tsp_means = df_tsp.groupby('Station_No')['TSP'].mean()
+    if not tsp_means.empty:
+        worst_tsp_station = tsp_means.idxmax()
+        st.metric(
+            label="🌫️ Trạm cao nhất (TSP)",
+            value=f"Trạm {worst_tsp_station}",
+            delta=f"{tsp_means.max():.1f} µg/m³",
+            delta_color="inverse"
+        )
+
+with kpi3:
+    best_station = map_data.loc[map_data[focus_pollutant].idxmin()]
+    diff = worst_station[focus_pollutant] - best_station[focus_pollutant]
+    st.metric(
+        label="📊 Chênh lệch Max-Min",
+        value=f"{diff:.1f} µg/m³",
+        delta=f"Min: {best_station[focus_pollutant]:.1f}",
+        delta_color="off"
+    )
+
+with kpi4:
+    n_exceed = (map_data[focus_pollutant] > threshold).sum()
+    st.metric(
+        label="⚠️ Vượt chuẩn WHO",
+        value=f"{n_exceed}/{len(map_data)} trạm",
+        delta=f"{(n_exceed/max(1, len(map_data)))*100:.0f}%",
+        delta_color="inverse"
+    )
+
+with kpi5:
+    st.metric(
+        label="📋 Dữ liệu hiển thị",
+        value=f"{len(df_filtered):,}",
+        delta="bản ghi"
+    )
+
+st.markdown("---")
+
+col_map, col_info = st.columns([7, 3])
 
 with col_map:
     st.subheader(f"Bản Đồ Phân Bố {focus_pollutant}")
@@ -128,7 +183,6 @@ with col_map:
         zoom=10.5,
         mapbox_style="carto-positron"
     )
-    fig_map.update_traces(hovertemplate="<b>%{hovertext}</b><br>Khu vực: %{customdata[0]}<br>Nồng độ: %{marker.size:.1f} µg/m³")
     fig_map.update_layout(
         margin={"r": 0, "t": 0, "l": 0, "b": 0},
         paper_bgcolor="rgba(0,0,0,0)",
@@ -137,38 +191,10 @@ with col_map:
     )
     st.plotly_chart(fig_map, use_container_width=True)
 
-with col_kpi:
-    st.subheader("Tổng Quan Chỉ Số")
-    
-    if len(map_data) > 0:
-        worst_station = map_data.loc[map_data[focus_pollutant].idxmax()]
-        best_station = map_data.loc[map_data[focus_pollutant].idxmin()]
-        
-        st.metric(
-            label=f"🔴 Trạm Ô Nhiễm Nhất ({focus_pollutant})",
-            value=f"Trạm {worst_station['Station_No']} ({worst_station['Location']})",
-            delta=f"{worst_station[focus_pollutant]:.1f} µg/m³",
-            delta_color="inverse"
-        )
-        
-        diff = worst_station[focus_pollutant] - best_station[focus_pollutant]
-        
-        st.metric(
-            label="📏 Chênh Lệch Max-Min Khu Vực",
-            value=f"{diff:.1f} µg/m³",
-            delta=f"Sạch nhất: Trạm {best_station['Station_No']} ({best_station[focus_pollutant]:.1f} µg/m³)",
-            delta_color="off"
-        )
-        
-        n_exceed = (map_data[focus_pollutant] > threshold).sum()
-        st.metric(
-            label=f"⚠️ Trạm Vượt Ngưỡng ({threshold} µg/m³)",
-            value=f"{n_exceed}/{len(map_data)} trạm",
-            delta=f"{(n_exceed/max(1, len(map_data)))*100:.0f}%",
-            delta_color="inverse"
-        )
-            
-        st.info("💡 **Insight:** Bản đồ Plotly Mapbox Darkmatter tích hợp bong bóng (Bubble) kích thước động giúp theo dõi những vùng có nồng độ ô nhiễm dày đặc trực quan hơn.")
+with col_info:
+    st.subheader("💡 Phân Tích Nhanh")
+    st.info(f"Dữ liệu cho thấy sự biến động không gian rõ rệt của {focus_pollutant}. Trạm {worst_station['Location']} ({worst_station['Region']}) ghi nhận mức cao nhất.")
+    st.info("Bản đồ Plotly Mapbox tích hợp bong bóng (Bubble) kích thước động giúp theo dõi những vùng có nồng độ ô nhiễm dày đặc trực quan hơn.")
 
 st.markdown("---")
 
@@ -178,8 +204,8 @@ st.header("🔬 Phân Tích Sâu Đa Chiều")
 col_chart1, col_chart2 = st.columns(2)
 
 with col_chart1:
-    df_region = df_filtered.groupby('Region')[['PM2.5', 'TSP', 'CO', 'NO2']].mean().reset_index()
-    cols_to_melt = [c for c in ['PM2.5', 'TSP', 'CO', 'NO2'] if c in df_region.columns]
+    df_region = df_filtered.groupby('Region')[['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']].mean().reset_index()
+    cols_to_melt = [c for c in ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2'] if c in df_region.columns]
     df_region_melt = df_region.melt(id_vars='Region', value_vars=cols_to_melt, var_name='Pollutant', value_name='Concentration')
     
     fig1 = px.bar(
@@ -210,13 +236,13 @@ with col_chart2:
         title=f"Phân Bố & Mức Độ Biến Động {focus_pollutant}",
         notched=True,
         labels={'Location': 'Trạm quan trắc', 'Region': 'Loại khu vực'},
-        color_discrete_sequence=['#4F6B7A'] # Neutral color to avoid specific pollutant color overlap
+        color_discrete_sequence=['#4F6B7A'] # Trung tính theo quy định
     )
     if threshold > 0:
-        fig3.add_hline(y=threshold, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng quy định")
+        fig3.add_hline(y=threshold, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO")
     st.plotly_chart(fig3, use_container_width=True)
 
-st.subheader(f"🔥 Diễn Biến {focus_pollutant} Không Gian - Thời Gian")
+st.subheader(f"🔥 Diễn Biến {focus_pollutant} Theo Thời Gian")
 df_filtered['Month_Year'] = df_filtered['Date'].dt.to_period('M').astype(str)
 df_timespace = df_filtered.groupby(['Month_Year', 'Location'])[focus_pollutant].mean().reset_index()
 
@@ -226,7 +252,7 @@ if len(df_timespace['Month_Year'].unique()) > 1:
         x='Month_Year',
         y='Location',
         z=focus_pollutant,
-        color_continuous_scale=[[0, '#1F8A70'], [0.5, '#FFB703'], [1, '#B23A2F']],
+        color_continuous_scale="Reds",
         labels={'Month_Year': 'Tháng/Năm', 'Location': 'Trạm quan trắc', focus_pollutant: 'Nồng độ'}
     )
     st.plotly_chart(fig_heat, use_container_width=True)
@@ -245,3 +271,6 @@ else:
         st.plotly_chart(fig_heat, use_container_width=True)
     else:
         st.info("🕒 Vui lòng chọn khoảng thời gian lớn hơn 1 ngày để xem Heatmap Diễn biến.")
+
+st.markdown("---")
+st.caption("Dữ liệu đã được xử lý missing theo time interpolation theo từng trạm; giữ outlier; hiệu chỉnh bất nhất PM2.5 > TSP theo tỷ lệ PM2.5/TSP tham chiếu.")
