@@ -133,7 +133,12 @@ def render_kpis(df: pd.DataFrame) -> None:
     avg_pm25 = df["PM2.5"].mean()
     avg_temp = df["Temperature"].mean()
     avg_hum  = df["Humidity"].mean()
-    pct_above_who = (df["PM2.5"] > WHO_PM25).mean() * 100
+
+    # WHO 15 µg/m³ là ngưỡng TRUNG BÌNH 24 GIỜ — phải tính daily mean trước rồi mới so sánh
+    daily_mean_pm25 = (
+        df.groupby(df["Datetime"].dt.date)["PM2.5"].mean()
+    )
+    pct_above_who = (daily_mean_pm25 > WHO_PM25).mean() * 100
 
     c1, c2, c3, c4 = st.columns(4)
 
@@ -152,9 +157,9 @@ def render_kpis(df: pd.DataFrame) -> None:
         value=f"{avg_hum:.1f} %",
     )
     c4.metric(
-        label="% giờ vượt ngưỡng WHO",
+        label="% ngày vượt ngưỡng WHO",
         value=f"{pct_above_who:.1f} %",
-        delta=f"Ngưỡng WHO: {WHO_PM25} µg/m³",
+        delta=f"Trung bình 24h > {WHO_PM25} µg/m³",
         delta_color="off",
     )
 
