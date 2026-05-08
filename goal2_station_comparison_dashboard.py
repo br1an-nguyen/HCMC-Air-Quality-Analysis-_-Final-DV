@@ -96,6 +96,7 @@ if flag_col in df_filtered.columns:
     df_filtered = df_filtered[df_filtered[flag_col] == 0]
 
 st.markdown("<br>", unsafe_allow_html=True)
+st.warning("⚠️ **Cảnh báo chất lượng dữ liệu:** Dữ liệu NO2 và SO2 tại Trạm 5 (Quận 3) có dấu hiệu phân phối bất thường (drift thiết bị đo, median SO2 vượt xa ngưỡng tự nhiên). Cần thận trọng khi diễn giải biểu đồ liên quan đến trạm này.")
 
 # ============= LAYER 2: SPATIAL OVERVIEW =============
 if df_filtered.empty:
@@ -119,17 +120,20 @@ with kpi1:
     )
 
 with kpi2:
-    # Max TSP across all filtered stations
-    df_tsp = df_filtered[df_filtered['TSP_flag'] == 0] if 'TSP_flag' in df_filtered.columns else df_filtered
-    tsp_means = df_tsp.groupby('Station_No')['TSP'].mean()
-    if not tsp_means.empty:
-        worst_tsp_station = tsp_means.idxmax()
-        st.metric(
-            label="🌫️ Trạm cao nhất (TSP)",
-            value=f"Trạm {worst_tsp_station}",
-            delta=f"{tsp_means.max():.1f} µg/m³",
-            delta_color="inverse"
-        )
+    # Mean of focus pollutant across network
+    flag_col = f"{focus_pollutant}_flag"
+    if flag_col in df.columns:
+        df_network = df[df[flag_col] == 0]
+    else:
+        df_network = df
+    network_mean = df_network[focus_pollutant].mean()
+    
+    st.metric(
+        label=f"🌐 Trung bình toàn mạng",
+        value=f"{network_mean:.1f} µg/m³",
+        delta=f"Toàn TPHCM",
+        delta_color="off"
+    )
 
 with kpi3:
     best_station = map_data.loc[map_data[focus_pollutant].idxmin()]
@@ -217,8 +221,25 @@ st.header("🔬 Phân Tích Sâu Đa Chiều")
 col_chart1, col_chart2 = st.columns(2)
 
 with col_chart1:
-    df_region = df_filtered.groupby('Region')[['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']].mean().reset_index()
-    cols_to_melt = [c for c in ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2'] if c in df_region.columns]
+    # Tính mean cho từng chất sau khi lọc flag == 0
+    pollutants_to_plot = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
+    valid_pollutants = [p for p in pollutants_to_plot if p in df_filtered.columns]
+    
+    mean_data = []
+    for region in df_filtered['Region'].unique():
+        region_data = {'Region': region}
+        df_r = df_filtered[df_filtered['Region'] == region]
+        for p in valid_pollutants:
+            flag_col = f"{p}_flag"
+            if flag_col in df_r.columns:
+                val = df_r[df_r[flag_col] == 0][p].mean()
+            else:
+                val = df_r[p].mean()
+            region_data[p] = val
+        mean_data.append(region_data)
+        
+    df_region = pd.DataFrame(mean_data)
+    cols_to_melt = valid_pollutants
     df_region_melt = df_region.melt(id_vars='Region', value_vars=cols_to_melt, var_name='Pollutant', value_name='Concentration')
     
     # Chuẩn hóa về % so với ngưỡng WHO để khắc phục lệch scale (CO quá lớn)
@@ -257,7 +278,7 @@ with col_chart2:
         title=f"Phân Bố & Mức Độ Biến Động {focus_pollutant}",
         notched=True,
         labels={'Location': 'Trạm quan trắc', 'Region': 'Loại khu vực'},
-        color_discrete_sequence=['#4F6B7A'] # Trung tính theo quy định
+        color_discrete_sequence=px.colors.qualitative.Pastel
     )
     if threshold > 0:
         fig3.add_hline(y=threshold, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO")
@@ -266,10 +287,17 @@ with col_chart2:
 st.markdown("#### 💡 Insight Phân Bố & Biến Động")
 
 # Dynamic Insight for Dominant Pollutant (Bar Chart)
+dominant_pollutant = ""
+dominant_region = ""
+if not df_region_melt.empty and not df_region_melt['Percent_WHO'].isna().all():
+    max_idx = df_region_melt['Percent_WHO'].idxmax()
+    dominant_pollutant = df_region_melt.loc[max_idx, 'Pollutant']
+    dominant_region = df_region_melt.loc[max_idx, 'Region']
+
 dominant_insight = (
-    "📌 **Đánh giá rủi ro (Chất chi phối):** Dựa vào tỷ lệ % WHO, ta thấy nghịch lý không gian: "
-    "Khu Giao thông/Công nghiệp đối mặt trực diện với bụi mịn PM2.5 và NO2 từ quá trình đốt cháy. "
-    "Tuy nhiên, khu nền đô thị thoáng đãng (như Linh Trung) lại tiềm ẩn rủi ro 'sát thủ thầm lặng' O3 do điều kiện quang hóa mạnh và thiếu khí NO để phản ứng tiêu thụ lại O3."
+    f"📌 **Đánh giá rủi ro (Chất chi phối):** Dựa vào tỷ lệ % WHO trên dữ liệu đã lọc, "
+    f"chất chi phối rủi ro sức khỏe chính là **{dominant_pollutant}** tại khu vực **{dominant_region}**. "
+    f"Điều này phản ánh sự khác biệt về nguồn phát thải (ví dụ: PM2.5/NO2 từ đốt cháy tại Giao thông/Công nghiệp, hay O3 từ quang hóa tại Nền đô thị)."
 )
 
 # Dynamic Insight for Box Plot
@@ -351,13 +379,13 @@ def render_conclusion():
             </h4>
             <ul style="margin-bottom: 0;">
                 <li>
-                    <b>Nguồn phát thải định hình bản đồ ô nhiễm</b>: Mạng lưới quan trắc cho thấy ô nhiễm không đồng nhất. Trạm <i>Giao thông (Quận 3, Bình Tân)</i> và <i>Công nghiệp (Tân Bình)</i> là các điểm nóng về hạt lơ lửng (PM2.5, TSP) và khí thải đốt cháy (CO, NO2).
+                    <b>PM2.5 và Nguồn phát thải</b>: Dữ liệu thực tế cho thấy khu <i>Dân cư (Thanh Đa)</i> lại là điểm nóng về PM2.5 cao nhất toàn mạng, vượt qua cả các khu Giao thông hay Công nghiệp. Điều này cho thấy rủi ro phơi nhiễm bụi mịn cực kỳ nghiêm trọng ngay tại nơi sinh sống.
                 </li>
                 <li>
-                    <b>Nghịch lý O3 ở ngoại ô</b>: Các trạm nền đô thị (như ĐHQG Linh Trung) tuy xa trung tâm nhưng lại là "rốn" của O3. Điều này phản ánh sự lan truyền tiền chất ô nhiễm từ nội đô kết hợp với không gian mở thuận lợi cho phản ứng quang hóa.
+                    <b>Nghịch lý O3 và NO2</b>: Trạm <i>Giao thông (Bình Tân)</i> ghi nhận nồng độ O3 cao nhất, trong khi <i>Nền đô thị (Linh Trung)</i> có NO2 cao nhất. Tương quan NO2 - O3 tại TP.HCM là thuận chiều (positive correlation), phản ánh sự tích lũy và chuyển hóa quang hóa đồng thời dưới tác động của bức xạ mặt trời vào ban ngày.
                 </li>
                 <li>
-                    <b>Hệ quả cho chính sách</b>: Các biện pháp cấm xe hay hạn chế phát thải cần được thiết kế <i>chuyên biệt cho từng cụm không gian</i> (Zoning). Việc chỉ áp dụng một chuẩn chung cho toàn thành phố sẽ kém hiệu quả do chênh lệch phơi nhiễm giữa các khu vực là rất lớn.
+                    <b>Hệ quả cho chính sách</b>: Các biện pháp kiểm soát cần thiết kế <i>chuyên biệt cho từng cụm không gian</i> (Zoning). Không thể áp chuẩn chung khi mà khu Dân cư đối mặt với PM2.5, còn khu Giao thông lại vật lộn với bức xạ O3.
                 </li>
             </ul>
         </div>
