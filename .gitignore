@@ -1,23 +1,42 @@
-.agent
+.agent/
 gemini.md
-.kiro
-review(1).md
-review(2).md
-.gitignore
+.kiro/
+review*.md
 
 # Python cache
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Virtual environments
 .venv/
 venv/
 env/
+ENV/
+bin/
+include/
+lib/
+share/
 
 # Jupyter
 .ipynb_checkpoints/
+*.ipynb
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project specific
+data/raw/
+!data/cleaned/
