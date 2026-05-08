@@ -25,6 +25,8 @@ COLOR_HIGHLIGHT = "#FFB703"
 HEALTH_RISK_COLORS  = {"Safe": COLOR_SAFE, "Hazardous": COLOR_HAZARDOUS}
 HEALTH_RISK_DISPLAY = {"Safe": "An toàn", "Hazardous": "Nguy hại"}
 
+WEEKDAY_ORDER_VI = ["Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7", "Chủ Nhật"]
+
 # ── Token giao diện ──
 CANVAS_BG      = "#F4F8FB"
 CARD_BG        = "#FFFFFF"
@@ -214,6 +216,87 @@ def Daily_PM25_Trend(df_city_daily: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def Hazardous_Heatmap(df: pd.DataFrame) -> go.Figure:
+    """
+    Heatmap: Hour (0-23) × DayOfWeek — tần suất giờ PM2.5 nguy hại.
+    Nhận df_pre_risk (đã lọc station+date, CHƯA lọc health_risk).
+    Dùng Hour_dt (từ datetime) để nhất quán với heatmap.
+    """
+    haz = df[df["Health_Risk"] == "Hazardous"].copy()
+
+    pivot = (
+        haz.groupby(["DayOfWeek", "Hour_dt"])
+        .size()
+        .reset_index(name="Count")
+        .pivot(index="DayOfWeek", columns="Hour_dt", values="Count")
+        .reindex(index=WEEKDAY_ORDER_VI, columns=range(24))
+        .fillna(0)
+    )
+
+    custom_scale = [
+        [0.0,  "#FFF5F0"],
+        [0.25, "#FCBBA1"],
+        [0.5,  "#FB6A4A"],
+        [0.75, "#CB181D"],
+        [1.0,  "#67000D"],
+    ]
+
+    fig = go.Figure(go.Heatmap(
+        z=pivot.values,
+        x=list(range(24)),
+        y=WEEKDAY_ORDER_VI,
+        colorscale=custom_scale,
+        colorbar=dict(title="Số lần<br>Nguy hại", title_font=dict(size=11)),
+        hovertemplate=(
+            "<b>%{y}</b> — %{x}:00<br>"
+            "Số lần nguy hại: %{z:,.0f}<extra></extra>"
+        ),
+    ))
+
+    # Đánh dấu ô đỉnh cao nhất
+    if pivot.values.max() > 0:
+        max_val = pivot.values.max()
+        max_row, max_col = np.unravel_index(pivot.values.argmax(), pivot.values.shape)
+        fig.add_shape(
+            type="rect",
+            x0=max_col - 0.5, x1=max_col + 0.5,
+            y0=max_row - 0.5, y1=max_row + 0.5,
+            line=dict(color=COLOR_HIGHLIGHT, width=2.5),
+            fillcolor="rgba(0,0,0,0)",
+        )
+        fig.add_annotation(
+            x=max_col, y=max_row,
+            text=f"Đỉnh: {int(max_val)}",
+            showarrow=True, arrowhead=2, arrowcolor=COLOR_HIGHLIGHT,
+            font=dict(size=11, color=COLOR_HIGHLIGHT, family="Segoe UI"),
+            bgcolor="rgba(22,50,79,0.85)", borderpad=4,
+            ax=40, ay=-30,
+        )
+
+    fig.update_layout(
+        **_base_layout_no_axes(
+            title=dict(
+                text="Tần suất giờ nguy hại theo ngày trong tuần và khung giờ",
+                font=dict(size=15),
+            ),
+            xaxis=dict(
+                title="Giờ trong ngày",
+                dtick=1,
+                gridcolor=GRIDLINE,
+                showgrid=False,
+            ),
+            yaxis=dict(
+                title="Ngày trong tuần",
+                gridcolor=GRIDLINE,
+                showgrid=False,
+                autorange="reversed",
+            ),
+            height=420,
+        )
+    )
+    return fig
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RENDER TRANG
 # ─────────────────────────────────────────────────────────────────────────────
@@ -339,8 +422,17 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
         st.warning("Không có dữ liệu trong khoảng đã chọn.")
         return
 
+    df_pre_risk["Health_Risk"] = np.where(
+        df_pre_risk["PM2.5"] <= PM25_SAFE_THRESHOLD, "Safe", "Hazardous",
+    )
+    df_pre_risk["Hour_dt"] = df_pre_risk["datetime"].dt.hour
+    day_map = {0: "Thứ 2", 1: "Thứ 3", 2: "Thứ 4", 3: "Thứ 5", 4: "Thứ 6", 5: "Thứ 7", 6: "Chủ Nhật"}
+    df_pre_risk["DayOfWeek"] = df_pre_risk["datetime"].dt.dayofweek.map(day_map)
+    df_pre_risk["DayOfWeek"] = pd.Categorical(df_pre_risk["DayOfWeek"], categories=WEEKDAY_ORDER_VI, ordered=True)
+
     # Tầng 1: df_hourly — dữ liệu theo giờ gốc, chỉ giữ các cột cần thiết
-    df_hourly = df_pre_risk[["Date", "Station_No", "PM2.5"]].copy()
+    df_hourly = df_pre_risk[["datetime", "Date", "Station_No", "PM2.5", "Hour_dt", "DayOfWeek"]].copy()
+    df_hourly = df_hourly.rename(columns={"Hour_dt": "Hour"})
 
     # Tầng 2: df_station_daily — trung bình ngày theo từng trạm
     df_station_daily = df_hourly.groupby(["Station_No", "Date"], as_index=False)["PM2.5"].mean()
@@ -357,19 +449,34 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     # ─────────────────────────────────────────────────────────────────────────
     # THẺ CHỈ SỐ (KPI CARDS)
     # ─────────────────────────────────────────────────────────────────────────
-    total_pm25 = df_hourly["PM2.5"].sum()
+    # Tính toán nồng độ trung bình thay vì tổng tích lũy
+    avg_pm25 = df_hourly["PM2.5"].mean() 
     total_days = len(df_city_daily)
     haz_days = int((df_city_daily["Health_Risk"] == "Hazardous").sum())
     haz_pct = (haz_days / total_days * 100) if total_days > 0 else 0
 
     k1, k2, k3 = st.columns(3)
-    k1.metric("Tổng nồng độ PM2.5 tích lũy", f"{total_pm25:,.0f} µg/m³",
-              help="Tổng nồng độ bụi mịn PM2.5 tích lũy trong khoảng thời gian đã lọc")
-    k2.metric("Tổng số ngày quan trắc", f"{total_days:,}",
-              help="Tổng số ngày có dữ liệu hợp lệ trong khoảng thời gian và khu vực đã chọn")
-    k3.metric("Số ngày nguy hại", f"{haz_days:,}",
-              delta=f"{haz_pct:.1f}% trên tổng số ngày", delta_color="inverse",
-              help="Số ngày có nồng độ PM2.5 trung bình vượt ngưỡng 15 µg/m³ của WHO")
+    
+    # Cập nhật nhãn, giá trị hiển thị (lấy 2 chữ số thập phân) và phần trợ giúp
+    k1.metric(
+        "Trung bình nồng độ PM2.5", 
+        f"{avg_pm25:.2f} µg/m³",
+        help="Nồng độ bụi mịn PM2.5 trung bình trong suốt khoảng thời gian và các trạm đã chọn"
+    )
+    
+    k2.metric(
+        "Tổng số ngày quan trắc", 
+        f"{total_days:,}",
+        help="Tổng số ngày có dữ liệu hợp lệ (tính theo lịch) trong khoảng thời gian đã lọc"
+    )
+    
+    k3.metric(
+        "Số ngày nguy hại", 
+        f"{haz_days:,}",
+        delta=f"{haz_pct:.1f}% trên tổng số ngày", 
+        delta_color="inverse",
+        help="Số ngày có nồng độ PM2.5 trung bình vượt ngưỡng 15 µg/m³ của WHO"
+    )
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
@@ -424,13 +531,65 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     if not df_city_daily.empty:
         peak_idx = df_city_daily["PM2.5"].idxmax()
         peak_row = df_city_daily.loc[peak_idx]
-        st.info(
+        peak_ratio = peak_row["PM2.5"] / PM25_SAFE_THRESHOLD if PM25_SAFE_THRESHOLD > 0 else np.nan
+        trend_msg = (
             f"Ngày có nồng độ PM2.5 trung bình cao nhất: {peak_row['Date']} "
             f"với giá trị {peak_row['PM2.5']:.2f} µg/m³, "
-            f"gấp {peak_row['PM2.5'] / PM25_SAFE_THRESHOLD:.1f} lần ngưỡng an toàn WHO "
-            f"({PM25_SAFE_THRESHOLD} µg/m³). "
-            f"Đây là cảnh báo mức độ trầm trọng cần được chú ý."
+            f"gấp {peak_ratio:.1f} lần ngưỡng an toàn WHO "
+            f"({PM25_SAFE_THRESHOLD} µg/m³)."
         )
+        if peak_ratio >= 2:
+            st.error(trend_msg)
+        elif peak_ratio > 1:
+            st.warning(trend_msg)
+        else:
+            st.info(trend_msg)
+    else:
+        st.warning("Không có dữ liệu để rút ra nhận xét cho biểu đồ xu hướng.")
+
+    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # HÀNG 3 — Heatmap chu kỳ thời gian
+    # ─────────────────────────────────────────────────────────────────────────
+    st.subheader("Mức độ rủi ro theo Chu kỳ thời gian")
+    st.caption(
+        "Lưu ý: Ngưỡng 15 µg/m³ là chuẩn trung bình 24 giờ của WHO, "
+        "tại đây được dùng như ngưỡng tham chiếu để so sánh theo từng giờ."
+    )
+    st.plotly_chart(Hazardous_Heatmap(df_pre_risk), use_container_width=True)
+
+    # Nhận xét động cho Heatmap
+    haz = df_pre_risk[df_pre_risk["Health_Risk"] == "Hazardous"]
+    if not haz.empty:
+        haz_pivot = (
+            haz.groupby(["DayOfWeek", "Hour_dt"]).size()
+            .reset_index(name="Count")
+            .pivot(index="DayOfWeek", columns="Hour_dt", values="Count")
+            .reindex(index=WEEKDAY_ORDER_VI, columns=range(24))
+            .fillna(0)
+        )
+        max_val = haz_pivot.values.max()
+        if max_val > 0:
+            max_row, max_col = np.unravel_index(haz_pivot.values.argmax(), haz_pivot.values.shape)
+            day_label = WEEKDAY_ORDER_VI[max_row]
+            hour_label = f"{int(max_col):02d}h"
+            total_haz = int(haz.shape[0])
+            share = (max_val / total_haz * 100) if total_haz > 0 else 0
+            heat_msg = (
+                f"Điểm nóng nguy hại tập trung nhất rơi vào {hour_label} ngày {day_label}, "
+                f"với {int(max_val)} lần xuất hiện."
+            )
+            if share >= 20:
+                st.error(heat_msg)
+            elif share >= 10:
+                st.warning(heat_msg)
+            else:
+                st.info(heat_msg)
+        else:
+            st.info("Không ghi nhận giờ nguy hại trong khoảng lọc, heatmap cho thấy mức an toàn.")
+    else:
+        st.warning("Không có dữ liệu để rút ra điểm nóng theo chu kỳ thời gian.")
 
 
 # Main
