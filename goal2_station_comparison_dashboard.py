@@ -120,16 +120,16 @@ with kpi1:
     )
 
 with kpi2:
-    # Mean of focus pollutant across network
+    # Mean of focus pollutant across network for filtered data
     flag_col = f"{focus_pollutant}_flag"
-    if flag_col in df.columns:
-        df_network = df[df[flag_col] == 0]
+    if flag_col in df_filtered.columns:
+        df_network = df_filtered[df_filtered[flag_col] == 0]
     else:
-        df_network = df
+        df_network = df_filtered
     network_mean = df_network[focus_pollutant].mean()
     
     st.metric(
-        label=f"🌐 Trung bình toàn mạng",
+        label=f"🌐 Trung bình (khoảng lọc)",
         value=f"{network_mean:.1f} µg/m³",
         delta=f"Toàn TPHCM",
         delta_color="off"
@@ -215,6 +215,24 @@ with col_info:
 
 st.markdown("---")
 
+# ============= NEW: RANKED HORIZONTAL BAR =============
+st.subheader(f"📊 Xếp Hạng Trạm Theo {focus_pollutant}")
+map_sorted = map_data.sort_values(focus_pollutant, ascending=True)
+fig_rank = px.bar(
+    map_sorted,
+    x=focus_pollutant,
+    y='Location',
+    color='Region',
+    orientation='h',
+    labels={'Location': '', focus_pollutant: f"{focus_pollutant} (µg/m³)"},
+    text_auto='.1f'
+)
+if threshold > 0:
+    fig_rank.add_vline(x=threshold, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO")
+st.plotly_chart(fig_rank, use_container_width=True)
+
+st.markdown("---")
+
 # ============= LAYER 3: ANALYTICAL DEEP DIVE =============
 st.header("🔬 Phân Tích Sâu Đa Chiều")
 
@@ -294,10 +312,20 @@ if not df_region_melt.empty and not df_region_melt['Percent_WHO'].isna().all():
     dominant_pollutant = df_region_melt.loc[max_idx, 'Pollutant']
     dominant_region = df_region_melt.loc[max_idx, 'Region']
 
+mechanism_map = {
+    'PM2.5': 'tích lũy từ đốt cháy và bụi đường',
+    'O3': 'quang hóa thứ cấp dưới bức xạ mặt trời',
+    'NO2': 'xả thải từ phương tiện và đốt nhiên liệu',
+    'CO': 'đốt cháy không hoàn toàn (xe máy, xe tải)',
+    'SO2': 'đốt than/dầu tại khu công nghiệp',
+    'TSP': 'bụi đường và hoạt động xây dựng'
+}
+mechanism = mechanism_map.get(dominant_pollutant, 'nguồn phát thải đặc thù')
+
 dominant_insight = (
     f"📌 **Đánh giá rủi ro (Chất chi phối):** Dựa vào tỷ lệ % WHO trên dữ liệu đã lọc, "
-    f"chất chi phối rủi ro sức khỏe chính là **{dominant_pollutant}** tại khu vực **{dominant_region}**. "
-    f"Điều này phản ánh sự khác biệt về nguồn phát thải (ví dụ: PM2.5/NO2 từ đốt cháy tại Giao thông/Công nghiệp, hay O3 từ quang hóa tại Nền đô thị)."
+    f"chất chi phối rủi ro sức khỏe chính là **{dominant_pollutant}** tại khu vực **{dominant_region}**, "
+    f"chủ yếu do {mechanism}."
 )
 
 # Dynamic Insight for Box Plot
@@ -320,31 +348,63 @@ else:
 
 st.info(dominant_insight + "\n\n" + boxplot_insight)
 
+st.markdown("---")
+st.subheader("🕸️ Profile Ô Nhiễm Đa Chiều Theo Trạm (% WHO)")
+
+categories = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
+thresholds_radar = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 40.0}
+
+fig_radar = go.Figure()
+for _, row in map_data.iterrows():
+    station_df = df_filtered[df_filtered['Station_No'] == row['Station_No']]
+    values = []
+    for p in categories:
+        flag_col = f"{p}_flag"
+        if flag_col in station_df.columns:
+            v = station_df[station_df[flag_col] == 0][p].mean()
+        else:
+            v = station_df[p].mean()
+        values.append((v / thresholds_radar.get(p, 1)) * 100 if pd.notna(v) else 0)
+    
+    fig_radar.add_trace(go.Scatterpolar(
+        r=values + [values[0]],
+        theta=categories + [categories[0]],
+        fill='toself',
+        name=row['Location'],
+        opacity=0.6
+    ))
+
+fig_radar.update_layout(
+    polar=dict(radialaxis=dict(visible=True, range=[0, 200])),
+    margin=dict(t=30, b=30, l=30, r=30)
+)
+st.plotly_chart(fig_radar, use_container_width=True)
+
 st.subheader(f"🔥 Diễn Biến {focus_pollutant} Theo Thời Gian")
 df_filtered['Month_Year'] = df_filtered['Date'].dt.to_period('M').astype(str)
 df_timespace = df_filtered.groupby(['Month_Year', 'Location'])[focus_pollutant].mean().reset_index()
 
 if len(df_timespace['Month_Year'].unique()) > 1:
-    fig_heat = px.density_heatmap(
-        df_timespace,
-        x='Month_Year',
-        y='Location',
-        z=focus_pollutant,
+    pivot = df_timespace.pivot(index='Location', columns='Month_Year', values=focus_pollutant)
+    fig_heat = px.imshow(
+        pivot,
         color_continuous_scale="Reds",
-        labels={'Month_Year': 'Tháng/Năm', 'Location': 'Trạm quan trắc', focus_pollutant: 'Nồng độ'}
+        aspect="auto",
+        labels=dict(x="Tháng/Năm", y="Trạm quan trắc", color=f"{focus_pollutant} (µg/m³)"),
+        title=f"Diễn Biến {focus_pollutant} Theo Thời Gian & Trạm Quan Trắc"
     )
     st.plotly_chart(fig_heat, use_container_width=True)
 else:
     df_filtered['Day'] = df_filtered['Date'].dt.date.astype(str)
     df_timespace_day = df_filtered.groupby(['Day', 'Location'])[focus_pollutant].mean().reset_index()
     if len(df_timespace_day['Day'].unique()) > 1:
-        fig_heat = px.density_heatmap(
-            df_timespace_day,
-            x='Day',
-            y='Location',
-            z=focus_pollutant,
+        pivot_day = df_timespace_day.pivot(index='Location', columns='Day', values=focus_pollutant)
+        fig_heat = px.imshow(
+            pivot_day,
             color_continuous_scale="Reds",
-            labels={'Day': 'Ngày', 'Location': 'Trạm quan trắc', focus_pollutant: 'Nồng độ'}
+            aspect="auto",
+            labels=dict(x="Ngày", y="Trạm quan trắc", color=f"{focus_pollutant} (µg/m³)"),
+            title=f"Diễn Biến {focus_pollutant} Theo Ngày & Trạm Quan Trắc"
         )
         st.plotly_chart(fig_heat, use_container_width=True)
     else:
