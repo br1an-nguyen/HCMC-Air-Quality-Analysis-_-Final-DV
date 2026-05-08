@@ -12,7 +12,7 @@ import streamlit as st
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-DEFAULT_DATA_PATH = Path("data/cleaned/Air_Quality_HCMC_Cleaned.csv")
+DEFAULT_DATA_PATH = Path(__file__).parent.parent / "data" / "cleaned" / "Air_Quality_HCMC_Cleaned.csv"
 
 # WHO 2021 annual guideline for PM2.5
 PM25_SAFE_THRESHOLD = 15.0  # µg/m³
