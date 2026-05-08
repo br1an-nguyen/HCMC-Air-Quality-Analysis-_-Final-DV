@@ -1,9 +1,3 @@
-"""
-P05_Correlation_Insights — HCMC Air Quality
-Mục tiêu 4: Tương quan nội bộ giữa CO, NO2, SO2, PM2.5
-Chạy: streamlit run p05_v4.py
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -110,6 +104,37 @@ html, body, [class*="css"] {{
 }}
 .rtable td {{ padding:6px 10px; border-top:1px solid {C['grid']}; }}
 
+/* ── Insight blocks ── */
+.ins-wrap {{
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}}
+.ins-card {{
+    border: 1px solid {C['border']};
+    border-left: 4px solid {C['NO2']};
+    border-radius: 8px;
+    padding: 11px 12px;
+    background: #FAFCFE;
+    min-height: 112px;
+}}
+.ins-head {{
+    font-size: 11px; font-weight: 700; color: {C['text']};
+    margin-bottom: 4px; letter-spacing: .2px;
+}}
+.ins-body {{
+    font-size: 11.5px; color: {C['sub']}; line-height: 1.55;
+}}
+.ins-strong {{ border-left-color: {C['pos']}; }}
+.ins-mid {{ border-left-color: {C['NO2']}; }}
+.ins-weak {{ border-left-color: #7C8AA7; }}
+.ins-neg {{ border-left-color: {C['neg']}; }}
+@media (max-width: 1100px) {{
+    .ins-wrap {{ grid-template-columns: 1fr; }}
+    .ins-card {{ min-height: auto; }}
+}}
+
 /* ── Divider ── */
 hr.div {{ border:none; border-top:1px solid {C['border']}; margin:18px 0; }}
 
@@ -146,7 +171,7 @@ with st.sidebar:
     date_ph    = st.empty()
     hour_ph    = st.empty()
     st.markdown("---")
-    st.markdown("**Scatter tuỳ chỉnh**")
+    st.markdown("**Scatter tùy chỉnh**")
     scatter_x = st.selectbox("Trục X", COLS, index=0)
     scatter_y = st.selectbox("Trục Y", COLS, index=2)
     color_by  = st.radio("Màu theo", ["Station_No", "Hour"], horizontal=True)
@@ -181,7 +206,6 @@ df = df_raw[
     df_raw["Hour"].between(sel_hours[0], sel_hours[1])
 ].copy()
 
-# Guard: if all stations are deselected or filters remove all rows, stop gracefully
 if df.empty:
     st.warning("⚠️ Không có dữ liệu sau bộ lọc. Vui lòng chọn ít nhất một trạm hoặc mở rộng phạm vi ngày/giờ.")
     st.stop()
@@ -220,10 +244,134 @@ def bl(h=290, mb=8):
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                 font=dict(family="DM Sans", color=C["text"]))
 
+def _pair_key(a, b):
+    return tuple(sorted([a, b]))
 
-# ═══════════════════════════════════════════════════════════════════════════════
+def _strength_label(r):
+    if pd.isna(r):
+        return "Không đủ dữ liệu", "ins-weak"
+    ar = abs(r)
+    if r < -0.1:
+        return "Nghịch biến nhẹ", "ins-neg"
+    if ar >= 0.6:
+        return "Tương quan mạnh", "ins-strong"
+    if ar >= 0.3:
+        return "Tương quan trung bình", "ins-mid"
+    return "Tương quan yếu", "ins-weak"
+
+def _fmt_r(r):
+    return "N/A" if pd.isna(r) else f"{r:+.3f}"
+
+def _pair_insight(a, b, r):
+    lbl, css = _strength_label(r)
+    key = _pair_key(a, b)
+
+    if key == ("CO", "SO2"):
+        if pd.isna(r):
+            txt = "Dữ liệu trong bộ lọc hiện tại chưa đủ để kết luận đồng biến CO-SO2."
+        elif r >= 0.6:
+            txt = "CO và SO2 tăng/giảm cùng pha rõ rệt, củng cố dấu hiệu nguồn đốt cháy nhiên liệu và giao thông diesel đang chi phối."
+        elif r >= 0.2:
+            txt = "CO-SO2 vẫn đồng biến nhưng chưa mạnh; có thể do khác biệt theo trạm hoặc theo khung giờ trong bộ lọc hiện tại."
+        else:
+            txt = "CO-SO2 đồng biến yếu trong phạm vi lọc này, cho thấy ảnh hưởng nguồn phát thải đang phân tán theo không gian/thời gian."
+    elif key == ("CO", "NO2"):
+        if pd.isna(r):
+            txt = "Chưa đủ dữ liệu để đánh giá mối quan hệ CO-NO2 trong bộ lọc hiện tại."
+        elif abs(r) < 0.15:
+            txt = "CO-NO2 rất yếu là kết quả thường gặp: NO2 chịu thêm quá trình quang hóa ban ngày nên không đi cùng CO theo một pha cố định."
+        elif r > 0:
+            txt = "CO-NO2 dương trong bộ lọc này, gợi ý vai trò phát thải sơ cấp (đặc biệt theo giờ cao điểm) đang nổi bật hơn."
+        else:
+            txt = "CO-NO2 âm nhẹ cho thấy lệch pha theo thời gian hoặc khác biệt khu vực phát thải trong tập dữ liệu đã lọc."
+    elif key == ("CO", "PM2.5"):
+        if pd.isna(r):
+            txt = "Chưa đủ dữ liệu để kết luận CO-PM2.5."
+        elif abs(r) >= 0.3:
+            txt = "CO-PM2.5 ở mức trung bình trở lên, cho thấy giao thông có đóng góp đáng kể vào bụi mịn trong giai đoạn/khung giờ đang xét."
+        else:
+            txt = "CO-PM2.5 yếu, phản ánh PM2.5 là bài toán đa nguồn (gió, ẩm, mưa, xây dựng, đốt rác...) ngoài giao thông."
+    elif key == ("NO2", "PM2.5"):
+        if pd.isna(r):
+            txt = "Chưa đủ dữ liệu để đánh giá NO2-PM2.5."
+        elif r < -0.1:
+            txt = "NO2-PM2.5 âm nhẹ cho thấy lệch pha thời gian: NO2 thường tăng khi quang hóa mạnh, còn PM2.5 có thể tích lũy theo điều kiện khí tượng khác."
+        else:
+            txt = "NO2-PM2.5 không âm rõ trong bộ lọc này; khả năng có đóng góp bụi thứ cấp hoặc đồng biến theo điều kiện tích tụ không khí."
+    else:
+        if pd.isna(r):
+            txt = "Không đủ dữ liệu để diễn giải cặp này trong bộ lọc hiện tại."
+        elif abs(r) >= 0.3:
+            txt = "Hai chất có xu hướng đi cùng nhau ở mức đáng kể trong tập dữ liệu đang lọc."
+        else:
+            txt = "Mối liên hệ giữa hai chất còn yếu, khả năng chịu tác động bởi nhiều nguồn/điều kiện khác nhau."
+
+    return lbl, css, txt
+
+def _scatter_dynamic_insights(sdf, x_col, y_col, color_mode, r_val):
+    insights = []
+    n = len(sdf)
+    strength, _ = _strength_label(r_val)
+
+    insights.append(
+        f"Bộ lọc hiện tại tạo ra {n} điểm hợp lệ cho cặp {x_col}-{y_col}; mức quan hệ tuyến tính tổng quát: {strength} (r = {_fmt_r(r_val)})."
+    )
+
+    if not pd.isna(r_val):
+        if r_val >= 0.3:
+            insights.append(
+                f"Khi {x_col} tăng, {y_col} có xu hướng tăng cùng chiều trong phạm vi lọc hiện tại."
+            )
+        elif r_val <= -0.1:
+            insights.append(
+                f"{x_col} và {y_col} có xu hướng ngược chiều nhẹ; cần lưu ý khả năng lệch pha theo thời điểm đo."
+            )
+        else:
+            insights.append(
+                f"Mối liên hệ giữa {x_col} và {y_col} đang yếu, cho thấy có thêm yếu tố khác cùng chi phối dữ liệu."
+            )
+
+    if n >= 20 and sdf[x_col].std() > 0:
+        slope = np.polyfit(sdf[x_col], sdf[y_col], 1)[0]
+        if slope > 0:
+            insights.append(
+                f"Độ dốc xu hướng OLS dương ({slope:.4f}) xác nhận chiều tăng của {y_col} theo {x_col}."
+            )
+        elif slope < 0:
+            insights.append(
+                f"Độ dốc xu hướng OLS âm ({slope:.4f}) cho thấy {y_col} giảm khi {x_col} tăng."
+            )
+
+    if color_mode == "Station_No":
+        st_rs = []
+        for st_no, g in sdf.groupby("Station_No"):
+            if len(g) >= 12:
+                r_st = g[[x_col, y_col]].corr().iloc[0, 1]
+                if not pd.isna(r_st):
+                    st_rs.append((st_no, r_st, len(g)))
+        if st_rs:
+            best = max(st_rs, key=lambda x: abs(x[1]))
+            insights.append(
+                f"Theo màu trạm, Trạm {best[0]} đang thể hiện quan hệ rõ nhất (r = {_fmt_r(best[1])}, n = {best[2]})."
+            )
+        else:
+            insights.append("Theo từng trạm, dữ liệu hợp lệ hiện chưa đủ dày để kết luận ổn định.")
+    else:
+        hour_mean = sdf.groupby("Hour")[y_col].mean().dropna()
+        if len(hour_mean) >= 3:
+            h_max = int(hour_mean.idxmax())
+            h_min = int(hour_mean.idxmin())
+            insights.append(
+                f"Theo màu giờ, {y_col} trung bình cao nhất quanh {h_max:02d}h và thấp nhất quanh {h_min:02d}h trong phạm vi lọc hiện tại."
+            )
+        else:
+            insights.append("Theo màu giờ, số mốc giờ hợp lệ còn ít nên insight theo thời điểm chỉ mang tính tham khảo.")
+
+    return insights[:4]
+
+# ══════════════════════════════════════════════════════════════════════════════
 # HEADER
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 st.markdown(f"""
 <div class="dash-header">
   <h1>Tương quan nội bộ giữa các chất ô nhiễm</h1>
@@ -236,9 +384,9 @@ st.markdown(f"""
 </div>""", unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 # KPI ROW
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
 k1,k2,k3,k4 = st.columns(4, gap="small")
 for col_ui, metric, fmt in zip([k1,k2,k3,k4], COLS, [".0f",".1f",".1f",".1f"]):
     with col_ui:
@@ -248,10 +396,9 @@ for col_ui, metric, fmt in zip([k1,k2,k3,k4], COLS, [".0f",".1f",".1f",".1f"]):
 st.markdown("<hr class='div'>", unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ROW 1 — Heatmap (trái, 38%) | Bảng r + Insight (phải, 62%)
-# Tách heatmap khỏi bảng r để hai cột cân đối
-# ═══════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════
+# ROW 1 – Heatmap (trái) | Bảng r + Insight (phải)
+# ══════════════════════════════════════════════════════════════════════════════
 r1_left, r1_right = st.columns([1.1, 1], gap="large")
 
 with r1_left:
@@ -279,11 +426,10 @@ with r1_left:
     st.plotly_chart(fig_hm, use_container_width=True, config={"displayModeBar":False})
 
 with r1_right:
-    st.markdown('<p class="stitle">Hệ số Pearson r — 6 cặp biến</p>'
+    st.markdown('<p class="stitle">Hệ số Pearson r – 6 cặp biến</p>'
                 '<p class="ssub">Mức độ tương quan tuyến tính · toàn bộ trạm · giá trị gốc (flag ≠ 2)</p>',
                 unsafe_allow_html=True)
 
-    # Bảng r — full-width trong cột phải
     rows_html = "".join(
         f"<tr><td style='font-weight:500;'>{a} – {b}</td>"
         f"<td>{rbadge(corr_ov.loc[a,b])}</td></tr>"
@@ -295,11 +441,28 @@ with r1_right:
       <tbody>{rows_html}</tbody>
     </table>""", unsafe_allow_html=True)
 
+# Insight động theo bộ lọc hiện tại
+st.markdown('<p class="stitle" style="margin-top:10px;">Insight theo dữ liệu đã lọc</p>',
+            unsafe_allow_html=True)
+
+focus_pairs = [("CO", "SO2"), ("CO", "NO2"), ("CO", "PM2.5"), ("NO2", "PM2.5")]
+insight_cards = []
+for a, b in focus_pairs:
+    rv = corr_ov.loc[a, b]
+    lbl, css, txt = _pair_insight(a, b, rv)
+    insight_cards.append(
+        f"<div class='ins-card {css}'>"
+        f"<div class='ins-head'>{a} – {b} · r = {_fmt_r(rv)} · {lbl}</div>"
+        f"<div class='ins-body'>{txt}</div>"
+        f"</div>"
+    )
+
+st.markdown(f"<div class='ins-wrap'>{''.join(insight_cards)}</div>", unsafe_allow_html=True)
 
 st.markdown("<hr class='div'>", unsafe_allow_html=True)
 
 st.markdown('<p class="stitle">Pair-scatter: CO là trục trung tâm</p>'
-            '<p class="ssub">CO so với NO₂ · SO₂ · PM2.5 — 400 mẫu · trendline OLS · màu theo trạm</p>',
+            '<p class="ssub">CO so với NO₂ · SO₂ · PM2.5 – 400 mẫu · trendline OLS · màu theo trạm</p>',
             unsafe_allow_html=True)
 
 pairs3   = [("CO","NO2"),("CO","SO2"),("CO","PM2.5")]
@@ -328,14 +491,8 @@ for col_ui, (xa,ya), lbl in zip(st.columns(3, gap="medium"), pairs3, labels3):
         legend=dict(
             title=dict(text="Trạm", font=dict(size=8.5)),
             font=dict(size=8.5),
-            orientation="v",
-            yanchor="top",
-            y=0.98,
-            xanchor="left",
-            x=1.02,
-            bgcolor="rgba(255,255,255,.88)",
-            bordercolor=C["border"],
-            borderwidth=1,
+            orientation="v", yanchor="top", y=0.98, xanchor="left", x=1.02,
+            bgcolor="rgba(255,255,255,.88)", bordercolor=C["border"], borderwidth=1,
         ),
         showlegend=True,
     )
@@ -345,10 +502,10 @@ for col_ui, (xa,ya), lbl in zip(st.columns(3, gap="medium"), pairs3, labels3):
 st.markdown("<hr class='div'>", unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ROW 3 — Scatter tuỳ chỉnh (expandable, full-width)
-# ═══════════════════════════════════════════════════════════════════════════════
-with st.expander(f"🔍  Scatter tuỳ chỉnh — {scatter_x} vs {scatter_y}  (chọn biến trong sidebar)",
+# ══════════════════════════════════════════════════════════════════════════════
+# ROW 3 – Scatter tùy chỉnh (expandable, full-width)
+# ══════════════════════════════════════════════════════════════════════════════
+with st.expander(f"🔎  Scatter tùy chỉnh – {scatter_x} vs {scatter_y}  (chọn biến trong sidebar)",
                  expanded=False):
     if scatter_x == scatter_y:
         st.warning("⚠️ Vui lòng chọn hai biến khác nhau.")
@@ -360,7 +517,6 @@ with st.expander(f"🔍  Scatter tuỳ chỉnh — {scatter_x} vs {scatter_y}  (
         sc_left, sc_right = st.columns([2.2, 1], gap="large")
 
         with sc_left:
-            # Layout chung cho cả 2 mode
             _axis_x = dict(title=dict(text=f"{scatter_x} ({UNITS[scatter_x]})", font=dict(size=12)),
                            gridcolor=C["grid"], zeroline=False,
                            showline=True, linecolor=C["border"], tickfont=dict(size=10))
@@ -379,14 +535,12 @@ with st.expander(f"🔍  Scatter tuỳ chỉnh — {scatter_x} vs {scatter_y}  (
                     **bl(340),
                     xaxis=_axis_x, yaxis=_axis_y,
                     hovermode="closest",
-                    # legend riêng, không có colorbar
                     legend=dict(
                         title=dict(text="Trạm", font=dict(size=11)),
                         bgcolor="rgba(255,255,255,.85)",
                         bordercolor=C["border"], borderwidth=1,
                         font=dict(size=11),
-                        x=1.01, y=1,            # đẩy legend ra ngoài chart
-                        xanchor="left", yanchor="top",
+                        x=1.01, y=1, xanchor="left", yanchor="top",
                     ),
                 )
             else:
@@ -399,14 +553,14 @@ with st.expander(f"🔍  Scatter tuỳ chỉnh — {scatter_x} vs {scatter_y}  (
                     **bl(340),
                     xaxis=_axis_x, yaxis=_axis_y,
                     hovermode="closest",
-                    showlegend=False,           # tắt legend text, chỉ giữ colorbar
+                    showlegend=False,
                     coloraxis_colorbar=dict(
                         title=dict(text="Giờ", font=dict(size=11)),
                         thickness=14, len=.75,
                         tickfont=dict(size=10),
                         tickvals=[0, 6, 12, 18, 23],
                         ticktext=["0h", "6h", "12h", "18h", "23h"],
-                        x=1.01,                 # đẩy colorbar sát cạnh phải
+                        x=1.01,
                     ),
                 )
 
@@ -418,7 +572,6 @@ with st.expander(f"🔍  Scatter tuỳ chỉnh — {scatter_x} vs {scatter_y}  (
             st.plotly_chart(fig_sc, use_container_width=True, config={"displayModeBar":False})
 
         with sc_right:
-            # Bảng r per-station cho cặp đang chọn
             st.markdown(f'<p class="stitle" style="font-size:12.5px;">'
                         f'r của {scatter_x}–{scatter_y} theo trạm</p>',
                         unsafe_allow_html=True)
@@ -432,3 +585,14 @@ with st.expander(f"🔍  Scatter tuỳ chỉnh — {scatter_x} vs {scatter_y}  (
               <thead><tr><th>Trạm</th><th>Hệ số r</th></tr></thead>
               <tbody>{rrows}</tbody>
             </table>""", unsafe_allow_html=True)
+
+        # Insight động theo cấu hình scatter
+        sc_ins = _scatter_dynamic_insights(sdf, scatter_x, scatter_y, color_by, rv)
+        sc_items = "".join([f"<li style='margin:0 0 4px 0;'>{line}</li>" for line in sc_ins])
+        st.markdown(
+            f"<div class='ins-card ins-mid' style='margin-top:12px;'>"
+            f"<div class='ins-head'>Insight cho Scatter tùy chỉnh: {scatter_x} vs {scatter_y} · màu theo {color_by}</div>"
+            f"<div class='ins-body'><ul style='padding-left:18px;margin:0;'>{sc_items}</ul></div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
