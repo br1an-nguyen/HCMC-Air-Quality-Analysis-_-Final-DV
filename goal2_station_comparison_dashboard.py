@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -65,7 +66,7 @@ with st.expander("🎛️ BỘ LỌC VÀ TÙY CHỈNH DỮ LIỆU (Filters & Con
         selected_station_ids = [int(s.split(" ")[1]) for s in selected_stations_raw]
         
         # Consistent threshold based on pollutant
-        threshold_vals = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 40.0}
+        threshold_vals = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 25.0}
         threshold = st.number_input(f"Ngưỡng WHO (µg/m³)", value=threshold_vals.get(focus_pollutant, 50.0))
         
     with col3:
@@ -91,9 +92,16 @@ df_filtered = df_filtered[
 ]
 
 # Apply data cleaning flag check
-flag_col = f"{focus_pollutant}_flag"
-if flag_col in df_filtered.columns:
-    df_filtered = df_filtered[df_filtered[flag_col] == 0]
+pollutants_all = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
+for p in pollutants_all:
+    flag_col = f"{p}_flag"
+    if flag_col in df_filtered.columns:
+        df_filtered.loc[df_filtered[flag_col] != 0, p] = np.nan
+
+# ============= DAILY AGGREGATION =============
+df_filtered['Date_only'] = df_filtered['Date'].dt.date
+df_daily = df_filtered.groupby(['Station_No', 'Location', 'Lat', 'Lon', 'Region', 'Date_only'])[pollutants_all].mean().reset_index()
+
 
 st.markdown("<br>", unsafe_allow_html=True)
 st.warning("⚠️ **Cảnh báo chất lượng dữ liệu:** Dữ liệu NO2 và SO2 tại Trạm 5 (Quận 3) có dấu hiệu phân phối bất thường (drift thiết bị đo, median SO2 vượt xa ngưỡng tự nhiên). Cần thận trọng khi diễn giải biểu đồ liên quan đến trạm này.")
@@ -104,7 +112,7 @@ if df_filtered.empty:
     st.stop()
 
 # Aggregates for Map
-map_data = df_filtered.groupby(['Station_No', 'Location', 'Lat', 'Lon', 'Region'])[focus_pollutant].mean().reset_index()
+map_data = df_daily.groupby(['Station_No', 'Location', 'Lat', 'Lon', 'Region'])[focus_pollutant].median().reset_index()
 map_data = map_data.dropna(subset=[focus_pollutant])
 
 # KPI CARDS SECTION (5 cards as per proposal.md)
@@ -121,15 +129,10 @@ with kpi1:
 
 with kpi2:
     # Mean of focus pollutant across network for filtered data
-    flag_col = f"{focus_pollutant}_flag"
-    if flag_col in df_filtered.columns:
-        df_network = df_filtered[df_filtered[flag_col] == 0]
-    else:
-        df_network = df_filtered
-    network_mean = df_network[focus_pollutant].mean()
+    network_mean = df_daily[focus_pollutant].median()
     
     st.metric(
-        label=f"🌐 Trung bình (khoảng lọc)",
+        label=f"🌐 Trung vị (khoảng lọc)",
         value=f"{network_mean:.1f} µg/m³",
         delta=f"Toàn TPHCM",
         delta_color="off"
@@ -199,36 +202,38 @@ with col_info:
     st.subheader("💡 Điểm Nóng Không Gian")
     st.markdown(f"**Trạm {worst_station['Location']} ({worst_station['Region']})** đang là điểm nóng nhất về **{focus_pollutant}** ({worst_station[focus_pollutant]:.1f} µg/m³).")
     
-    # Dynamic insight based on pollutant type
-    if focus_pollutant in ['PM2.5', 'TSP', 'SO2']:
-        st.info(
-            f"📌 **Gợi ý phân tích (Nhóm hạt lơ lửng & Khí bền):**\n\n"
-            f"- **Tính phân tán:** {focus_pollutant} có khả năng phát tán xa theo chiều gió.\n"
-            f"- Nếu mức chênh lệch (Max-Min = {diff:.1f}) giữa các trạm tương đối nhỏ, chứng tỏ ô nhiễm là vấn đề vùng (regional). Ngược lại, mức chênh lệch lớn này chỉ ra có nguồn xả thải cực mạnh ngay tại **{worst_station['Region']}**."
-        )
-    else:
-        st.info(
-            f"📌 **Gợi ý phân tích (Nhóm khí phản ứng nhanh):**\n\n"
-            f"- **Đặc tính cục bộ:** Các khí như {focus_pollutant} thường suy giảm rất nhanh theo khoảng cách tính từ nguồn phát.\n"
-            f"- Mức độ ô nhiễm cao tại **{worst_station['Location']}** phản ánh chính xác nguồn phát thải sơ cấp (mật độ xe/nhà máy) ngay tại tọa độ đó, hoặc là hệ quả của phản ứng quang hóa mạnh (như trường hợp O3)."
-        )
+    st.info(
+        f"📌 **Thực trạng dữ liệu:**\n\n"
+        f"- Chênh lệch nồng độ giữa trạm cao nhất và thấp nhất là **{diff:.1f} µg/m³**.\n"
+        f"- Có **{n_exceed}/{len(map_data)}** trạm đang vượt ngưỡng khuyến cáo của WHO ({threshold} µg/m³)."
+    )
 
 st.markdown("---")
 
 # ============= NEW: RANKED HORIZONTAL BAR =============
 st.subheader(f"📊 Xếp Hạng Trạm Theo {focus_pollutant}")
 map_sorted = map_data.sort_values(focus_pollutant, ascending=True)
+
+if threshold > 0:
+    map_sorted['Alert'] = map_sorted[focus_pollutant].apply(lambda x: 'Vượt ngưỡng' if x > threshold else 'An toàn')
+    color_map = {'Vượt ngưỡng': '#B23A2F', 'An toàn': '#94A3B8'}
+    color_col = 'Alert'
+else:
+    color_map = None
+    color_col = 'Region'
+
 fig_rank = px.bar(
     map_sorted,
     x=focus_pollutant,
     y='Location',
-    color='Region',
+    color=color_col,
+    color_discrete_map=color_map,
     orientation='h',
-    labels={'Location': '', focus_pollutant: f"{focus_pollutant} (µg/m³)"},
+    labels={'Location': '', focus_pollutant: f"{focus_pollutant} (µg/m³)", 'Alert': 'Trạng thái'},
     text_auto='.1f'
 )
 if threshold > 0:
-    fig_rank.add_vline(x=threshold, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO")
+    fig_rank.add_vline(x=threshold, line_dash="dash", line_color="#E63946", annotation_text="Ngưỡng WHO", annotation_position="top right", layer="above")
 st.plotly_chart(fig_rank, use_container_width=True)
 
 st.markdown("---")
@@ -236,9 +241,7 @@ st.markdown("---")
 # ============= LAYER 3: ANALYTICAL DEEP DIVE =============
 st.header("🔬 Phân Tích Sâu Đa Chiều")
 
-col_chart1, col_chart2 = st.columns(2)
-
-with col_chart1:
+with st.container(border=True):
     # Tính mean cho từng chất sau khi lọc flag == 0
     pollutants_to_plot = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
     valid_pollutants = [p for p in pollutants_to_plot if p in df_filtered.columns]
@@ -246,13 +249,9 @@ with col_chart1:
     mean_data = []
     for region in df_filtered['Region'].unique():
         region_data = {'Region': region}
-        df_r = df_filtered[df_filtered['Region'] == region]
+        df_r = df_daily[df_daily['Region'] == region]
         for p in valid_pollutants:
-            flag_col = f"{p}_flag"
-            if flag_col in df_r.columns:
-                val = df_r[df_r[flag_col] == 0][p].mean()
-            else:
-                val = df_r[p].mean()
+            val = df_r[p].median()
             region_data[p] = val
         mean_data.append(region_data)
         
@@ -260,36 +259,40 @@ with col_chart1:
     cols_to_melt = valid_pollutants
     df_region_melt = df_region.melt(id_vars='Region', value_vars=cols_to_melt, var_name='Pollutant', value_name='Concentration')
     
-    # Chuẩn hóa về % so với ngưỡng WHO để khắc phục lệch scale (CO quá lớn)
-    thresholds = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 40.0}
+    # Chuẩn hóa về % so với ngưỡng WHO
+    thresholds = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 25.0}
     df_region_melt['Percent_WHO'] = df_region_melt.apply(
         lambda row: (row['Concentration'] / thresholds.get(row['Pollutant'], 1)) * 100, axis=1
     )
     
+    # Highlight highest bar in each region
+    df_region_melt['Is_Max'] = df_region_melt.groupby('Region')['Percent_WHO'].transform(lambda x: x == x.max())
+    df_region_melt['Color_Group'] = df_region_melt['Is_Max'].map({True: 'Cao nhất', False: 'Khác'})
+    
     fig1 = px.bar(
         df_region_melt,
-        x='Region',
-        y='Percent_WHO',
-        color='Pollutant',
-        barmode='group',
-        color_discrete_map={
-            'PM2.5': '#B23A2F', 
-            'TSP': '#6F1D1B', 
-            'O3': '#1F8A70', 
-            'CO': '#4E5D8A', 
-            'NO2': '#D98E04', 
-            'SO2': '#2B7BBB'
-        },
-        title="Mức Độ Ô Nhiễm So Với Ngưỡng WHO (%)",
-        labels={'Region': 'Khu vực', 'Percent_WHO': '% so với ngưỡng WHO', 'Pollutant': 'Chất ô nhiễm'},
+        x='Percent_WHO',
+        y='Pollutant',
+        facet_col='Region',
+        facet_col_wrap=2,
+        color='Color_Group',
+        color_discrete_map={'Cao nhất': '#B23A2F', 'Khác': '#94A3B8'},
+        orientation='h',
+        title="Hồ Sơ Ô Nhiễm Theo Khu Vực (% WHO)",
+        labels={'Percent_WHO': '% WHO', 'Pollutant': ''},
         hover_data={'Concentration': ':.1f'}
     )
-    fig1.add_hline(y=100, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO (100%)")
+    fig1.update_layout(
+        showlegend=False,
+        height=700,
+        margin=dict(t=50, b=30, l=30, r=30)
+    )
+    fig1.add_vline(x=100, line_dash="dash", line_color="#E63946", annotation_text="100% WHO", annotation_position="top right", layer="above")
     st.plotly_chart(fig1, use_container_width=True)
     
-with col_chart2:
+with st.container(border=True):
     fig3 = px.box(
-        df_filtered,
+        df_daily,
         x='Location',
         y=focus_pollutant,
         color='Region',
@@ -299,122 +302,246 @@ with col_chart2:
         color_discrete_sequence=px.colors.qualitative.Pastel
     )
     if threshold > 0:
-        fig3.add_hline(y=threshold, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO")
+        fig3.add_hline(y=threshold, line_dash="dash", line_color="#E63946", annotation_text="Ngưỡng WHO", annotation_position="top right", layer="above")
     st.plotly_chart(fig3, use_container_width=True)
 
-st.markdown("#### 💡 Insight Phân Bố & Biến Động")
+st.markdown("#### 💡 Insight Thuần Dữ Liệu")
 
-# Dynamic Insight for Dominant Pollutant (Bar Chart)
+# Insight 1: Dominant Pollutant (Facet Bar)
 dominant_pollutant = ""
 dominant_region = ""
+max_who_val = 0
 if not df_region_melt.empty and not df_region_melt['Percent_WHO'].isna().all():
     max_idx = df_region_melt['Percent_WHO'].idxmax()
     dominant_pollutant = df_region_melt.loc[max_idx, 'Pollutant']
     dominant_region = df_region_melt.loc[max_idx, 'Region']
-
-mechanism_map = {
-    'PM2.5': 'tích lũy từ đốt cháy và bụi đường',
-    'O3': 'quang hóa thứ cấp dưới bức xạ mặt trời',
-    'NO2': 'xả thải từ phương tiện và đốt nhiên liệu',
-    'CO': 'đốt cháy không hoàn toàn (xe máy, xe tải)',
-    'SO2': 'đốt than/dầu tại khu công nghiệp',
-    'TSP': 'bụi đường và hoạt động xây dựng'
-}
-mechanism = mechanism_map.get(dominant_pollutant, 'nguồn phát thải đặc thù')
+    max_who_val = df_region_melt.loc[max_idx, 'Percent_WHO']
 
 dominant_insight = (
-    f"📌 **Đánh giá rủi ro (Chất chi phối):** Dựa vào tỷ lệ % WHO trên dữ liệu đã lọc, "
-    f"chất chi phối rủi ro sức khỏe chính là **{dominant_pollutant}** tại khu vực **{dominant_region}**, "
-    f"chủ yếu do {mechanism}."
+    f"📌 **Chất chi phối rủi ro (Small Multiples):** Tại {dominant_region}, **{dominant_pollutant}** đang là chất chiếm tỷ trọng cao nhất "
+    f"({max_who_val:.0f}% so với ngưỡng WHO)."
 )
 
-# Dynamic Insight for Box Plot
-if focus_pollutant in ['PM2.5', 'CO', 'NO2']:
+# Insight 2: Volatility (Box Plot)
+q1 = df_daily.groupby('Location')[focus_pollutant].quantile(0.25)
+q3 = df_daily.groupby('Location')[focus_pollutant].quantile(0.75)
+iqr = q3 - q1
+if not iqr.empty:
+    max_iqr_station = iqr.idxmax()
+    max_iqr_val = iqr.max()
+    min_iqr_val = iqr.min()
     boxplot_insight = (
-        f"📌 **Mô hình xả thải ({focus_pollutant}):** Box plot phản ánh chu kỳ hoạt động đặc thù. "
-        "Hộp (IQR) rộng biểu thị khu vực chịu tác động mạnh của chu kỳ xả thải theo pha (ví dụ: kẹt xe giờ cao điểm). "
-        "Các điểm ngoại lai (outliers) là tín hiệu cảnh báo các đợt ùn tắc cục bộ hoặc sự kiện xả thải cấp tính bất thường."
-    )
-elif focus_pollutant == 'O3':
-    boxplot_insight = (
-        f"📌 **Mô hình xả thải (O3):** Sự phân tán (độ rộng IQR) của O3 phụ thuộc chặt chẽ vào chu kỳ bức xạ mặt trời trong ngày thay vì xả thải trực tiếp. "
-        "Các điểm ngoại lai (outliers) phía trên thường là dấu vết của những ngày nắng nóng gay gắt kéo dài, kích thích phản ứng quang hóa."
+        f"📌 **Độ biến động (Box plot):** Trạm **{max_iqr_station}** có biên độ dao động nồng độ (IQR) lớn nhất ({max_iqr_val:.1f} µg/m³), "
+        f"gấp {max_iqr_val/max(min_iqr_val, 1):.1f} lần so với trạm có biến động nhỏ nhất."
     )
 else:
-    boxplot_insight = (
-        f"📌 **Mô hình xả thải ({focus_pollutant}):** Độ rộng của hộp (IQR) cho biết mức độ dao động nồng độ. "
-        "Hộp hẹp nghĩa là mức nền ô nhiễm tĩnh, tích tụ đều đặn. Hộp rộng và nhiều Outliers là dấu hiệu của sự gián đoạn trong mô hình xả thải hoặc thời tiết."
-    )
+    boxplot_insight = ""
 
 st.info(dominant_insight + "\n\n" + boxplot_insight)
 
 st.markdown("---")
 st.subheader("🕸️ Profile Ô Nhiễm Đa Chiều Theo Trạm (% WHO)")
 
-categories = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
-thresholds_radar = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 40.0}
+col_radar_title, col_radar_toggle = st.columns([7, 3])
+with col_radar_toggle:
+    auto_scale = st.toggle(
+        "Mở rộng trục (Auto-Scale)", 
+        value=False, 
+        help="Tắt: Ép trục ở mức 200% để hình dáng không bị bẹp. Bật: Scale theo tỷ lệ thực tế cao nhất."
+    )
+
+# Gom nhóm các chất: Bụi (PM2.5, TSP) -> Khí đặc trưng giao thông (NO2, CO) -> Khí đặc trưng CN/quang hóa (SO2, O3)
+categories = ['PM2.5', 'TSP', 'NO2', 'CO', 'SO2', 'O3']
+thresholds_radar = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 25.0}
 
 fig_radar = go.Figure()
-for _, row in map_data.iterrows():
-    station_df = df_filtered[df_filtered['Station_No'] == row['Station_No']]
+
+# Thêm đường Red Line 100% (Ngưỡng WHO)
+fig_radar.add_trace(go.Scatterpolar(
+    r=[100] * len(categories) + [100],
+    theta=categories + [categories[0]],
+    mode='lines',
+    line=dict(color='red', dash='dash', width=2),
+    name='Ngưỡng WHO (100%)',
+    hoverinfo='none'
+))
+
+# Chỉ hiển thị 2 trạm: Tồi tệ nhất và Tốt nhất (dựa trên focus_pollutant)
+worst_station = map_data.loc[map_data[focus_pollutant].idxmax()]
+best_station = map_data.loc[map_data[focus_pollutant].idxmin()]
+stations_to_plot = [worst_station]
+if worst_station['Station_No'] != best_station['Station_No']:
+    stations_to_plot.append(best_station)
+
+total_risk_worst = 0
+total_risk_best = 0
+
+for row in stations_to_plot:
+    station_df = df_daily[df_daily['Station_No'] == row['Station_No']]
     values = []
+    uncapped_values = []
     for p in categories:
-        flag_col = f"{p}_flag"
-        if flag_col in station_df.columns:
-            v = station_df[station_df[flag_col] == 0][p].mean()
-        else:
-            v = station_df[p].mean()
-        values.append((v / thresholds_radar.get(p, 1)) * 100 if pd.notna(v) else 0)
+        v = station_df[p].median()
+        val_perc = (v / thresholds_radar.get(p, 1)) * 100 if pd.notna(v) else 0
+        uncapped_values.append(val_perc)
+        
+        # Kỹ thuật Cap & Annotate: Ép đỉnh ở 200% nhưng bắn text báo số thật (nếu tắt auto_scale)
+        capped_val = val_perc if auto_scale else min(val_perc, 200)
+        values.append(capped_val)
+        
+        if not auto_scale and val_perc > 200:
+            fig_radar.add_trace(go.Scatterpolar(
+                r=[200],
+                theta=[p],
+                mode='text',
+                text=[f" ⚠️ {val_perc:.0f}% "],
+                textposition="top right",
+                textfont=dict(color="#E63946", size=11, weight="bold"),
+                showlegend=False,
+                hoverinfo='none'
+            ))
+            
+    if row['Station_No'] == worst_station['Station_No']:
+        total_risk_worst = sum(uncapped_values)
+    if row['Station_No'] == best_station['Station_No']:
+        total_risk_best = sum(uncapped_values)
+    
+    # Worst station = Reddish, Best station = Blueish
+    color = '#B23A2F' if row['Station_No'] == worst_station['Station_No'] else '#2B7BBB'
     
     fig_radar.add_trace(go.Scatterpolar(
         r=values + [values[0]],
         theta=categories + [categories[0]],
         fill='toself',
-        name=row['Location'],
+        name=f"Trạm {row['Location']} ({row['Region']})",
+        line=dict(color=color),
         opacity=0.6
     ))
 
+radialaxis_dict = dict(visible=True)
+if not auto_scale:
+    radialaxis_dict['range'] = [0, 200]
+
 fig_radar.update_layout(
-    polar=dict(radialaxis=dict(visible=True, range=[0, 200])),
+    polar=dict(radialaxis=radialaxis_dict),
     margin=dict(t=30, b=30, l=30, r=30)
 )
 st.plotly_chart(fig_radar, use_container_width=True)
 
-st.subheader(f"🔥 Diễn Biến {focus_pollutant} Theo Thời Gian")
-df_filtered['Month_Year'] = df_filtered['Date'].dt.to_period('M').astype(str)
-df_timespace = df_filtered.groupby(['Month_Year', 'Location'])[focus_pollutant].mean().reset_index()
-
-if len(df_timespace['Month_Year'].unique()) > 1:
-    pivot = df_timespace.pivot(index='Location', columns='Month_Year', values=focus_pollutant)
-    fig_heat = px.imshow(
-        pivot,
-        color_continuous_scale="Reds",
-        aspect="auto",
-        labels=dict(x="Tháng/Năm", y="Trạm quan trắc", color=f"{focus_pollutant} (µg/m³)"),
-        title=f"Diễn Biến {focus_pollutant} Theo Thời Gian & Trạm Quan Trắc"
-    )
-    st.plotly_chart(fig_heat, use_container_width=True)
-else:
-    df_filtered['Day'] = df_filtered['Date'].dt.date.astype(str)
-    df_timespace_day = df_filtered.groupby(['Day', 'Location'])[focus_pollutant].mean().reset_index()
-    if len(df_timespace_day['Day'].unique()) > 1:
-        pivot_day = df_timespace_day.pivot(index='Location', columns='Day', values=focus_pollutant)
-        fig_heat = px.imshow(
-            pivot_day,
-            color_continuous_scale="Reds",
-            aspect="auto",
-            labels=dict(x="Ngày", y="Trạm quan trắc", color=f"{focus_pollutant} (µg/m³)"),
-            title=f"Diễn Biến {focus_pollutant} Theo Ngày & Trạm Quan Trắc"
+# Generate Shape Profiling & Axis Dominance Insight
+radar_insights = []
+for row in stations_to_plot:
+    station_df = df_daily[df_daily['Station_No'] == row['Station_No']]
+    uncapped_values = []
+    max_p = ""
+    max_val = 0
+    for p in categories:
+        v = station_df[p].median()
+        val_perc = (v / thresholds_radar.get(p, 1)) * 100 if pd.notna(v) else 0
+        uncapped_values.append(val_perc)
+        if val_perc > max_val:
+            max_val = val_perc
+            max_p = p
+            
+    total_risk = sum(uncapped_values)
+    if total_risk > 0:
+        ratio = (max_val / total_risk) * 100
+        radar_insights.append(
+            f"- **Trạm {row['Location']}:** Hình đa giác bị kéo lệch mạnh về trục **{max_p}**, "
+            f"chiếm **{ratio:.0f}%** tổng diện tích rủi ro đa chiều (đạt mức {max_val:.0f}% WHO)."
         )
-        st.plotly_chart(fig_heat, use_container_width=True)
-    else:
-        st.info("🕒 Vui lòng chọn khoảng thời gian lớn hơn 1 ngày để xem Heatmap Diễn biến.")
 
-st.info(
-    f"📌 **Bóc tách Vĩ mô và Vi mô qua Heatmap ({focus_pollutant}):**\n\n"
-    f"- **Đồng bộ (Trục dọc sậm màu):** Nếu nhiều trạm cùng sậm màu vào một thời điểm, tác nhân chi phối là **Vĩ mô** (ví dụ: bước vào mùa khô, nghịch nhiệt diện rộng khóa chặt ô nhiễm).\n"
-    f"- **Cục bộ (Trục ngang sậm màu):** Nếu chỉ 1 trạm sậm màu kéo dài trong khi các trạm khác sạch, tác nhân là **Vi mô** (ví dụ: công trình xây dựng mới, thay đổi luồng giao thông quanh trạm đó)."
+if radar_insights:
+    radar_insight = "📌 **Phân tích Hình Thái & Độ Lệch Tâm (Shape Profiling & Axis Dominance):**\n\n" + "\n".join(radar_insights)
+else:
+    radar_insight = "📌 **Phân tích Hình Thái:** Không đủ dữ liệu để phân tích độ lệch tâm."
+
+st.info(radar_insight)
+
+# Pre-processing
+df_filtered['Hour'] = pd.to_numeric(df_filtered['Hour'], errors='coerce')
+df_filtered['Day_Night'] = df_filtered['Hour'].apply(lambda x: 'Ngày (6h-18h)' if 6 <= x < 18 else 'Đêm (18h-6h)')
+df_dn_daily = df_filtered.groupby(['Location', 'Date_only', 'Day_Night'])[focus_pollutant].mean().reset_index()
+df_dn = df_dn_daily.groupby(['Location', 'Day_Night'])[focus_pollutant].median().reset_index()
+df_dn_pivot = df_dn.pivot(index='Location', columns='Day_Night', values=focus_pollutant).reset_index()
+
+fig_a = go.Figure()
+night_higher_stations = []
+
+for i, row in df_dn_pivot.iterrows():
+    day_val = row.get('Ngày (6h-18h)', 0)
+    night_val = row.get('Đêm (18h-6h)', 0)
+    loc = row['Location']
+    
+    # Highlight Box cho Surprise Insight
+    if night_val > day_val:
+        night_higher_stations.append(f"**{loc}**")
+        fig_a.add_shape(
+            type="rect",
+            x0=day_val - (day_val * 0.05) if day_val > 0 else 0,
+            y0=i - 0.4,
+            x1=night_val + (night_val * 0.05),
+            y1=i + 0.4,
+            line=dict(color="#E63946", width=2, dash="dot"),
+            fillcolor="rgba(230, 57, 70, 0.1)",
+            layer="below"
+        )
+        fig_a.add_annotation(
+            x=night_val + (night_val * 0.05),
+            y=i,
+            text="⚠️ Đêm > Ngày",
+            showarrow=False,
+            font=dict(color="#E63946", size=11, weight="bold"),
+            xanchor="left"
+        )
+
+    fig_a.add_trace(go.Scatter(
+        x=[night_val, day_val],
+        y=[loc, loc],
+        mode='lines',
+        line=dict(color='gray', width=2),
+        showlegend=False
+    ))
+    fig_a.add_trace(go.Scatter(
+        x=[day_val],
+        y=[loc],
+        mode='markers',
+        marker=dict(color='#FFB703', size=14, symbol='circle'),
+        name='Ngày (6h-18h)' if i == 0 else "",
+        showlegend=True if i == 0 else False
+    ))
+    fig_a.add_trace(go.Scatter(
+        x=[night_val],
+        y=[loc],
+        mode='markers',
+        marker=dict(color='#2B7BBB', size=14, symbol='diamond'),
+        name='Đêm (18h-6h)' if i == 0 else "",
+        showlegend=True if i == 0 else False
+    ))
+
+fig_a.update_layout(
+    title="Chênh lệch Nồng độ Trung vị: Ban Ngày vs Ban Đêm", 
+    xaxis_title=f"{focus_pollutant} (µg/m³)",
+    yaxis_title="",
+    height=400,
+    margin=dict(t=50, b=30, l=10, r=10)
 )
+if threshold > 0:
+    fig_a.add_vline(x=threshold, line_dash="dash", line_color="#E63946", annotation_text="Ngưỡng WHO", annotation_position="top right", layer="above")
+
+with st.container(border=True):
+    st.subheader(f"🌓 Khám Phá Nghịch Lý Ngày & Đêm ({focus_pollutant})")
+    st.plotly_chart(fig_a, use_container_width=True)
+    
+    # Display Text Insight
+    if night_higher_stations:
+        st.info(
+            f"📌 **Insight thú vị:** Dữ liệu cho thấy trạm {', '.join(night_higher_stations)} có **nồng độ {focus_pollutant} trung vị ban đêm (18h-6h) CAO HƠN ban ngày (6h-18h)**."
+        )
+    else:
+        st.info(
+            f"📌 **Dữ liệu xu hướng:** 100% các trạm trong khoảng lọc đều tuân theo quy luật nồng độ ban ngày cao hơn ban đêm."
+        )
 
 st.markdown("---")
 st.caption("Dữ liệu đã được xử lý missing theo time interpolation theo từng trạm; giữ outlier; hiệu chỉnh bất nhất PM2.5 > TSP theo tỷ lệ PM2.5/TSP tham chiếu.")
