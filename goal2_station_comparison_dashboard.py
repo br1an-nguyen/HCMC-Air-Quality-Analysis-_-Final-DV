@@ -192,9 +192,22 @@ with col_map:
     st.plotly_chart(fig_map, use_container_width=True)
 
 with col_info:
-    st.subheader("💡 Phân Tích Nhanh")
-    st.info(f"Dữ liệu cho thấy sự biến động không gian rõ rệt của {focus_pollutant}. Trạm {worst_station['Location']} ({worst_station['Region']}) ghi nhận mức cao nhất.")
-    st.info("Bản đồ Plotly Mapbox tích hợp bong bóng (Bubble) kích thước động giúp theo dõi những vùng có nồng độ ô nhiễm dày đặc trực quan hơn.")
+    st.subheader("💡 Điểm Nóng Không Gian")
+    st.markdown(f"**Trạm {worst_station['Location']} ({worst_station['Region']})** đang là điểm nóng nhất về **{focus_pollutant}** ({worst_station[focus_pollutant]:.1f} µg/m³).")
+    
+    # Dynamic insight based on pollutant type
+    if focus_pollutant in ['PM2.5', 'TSP', 'SO2']:
+        st.info(
+            f"📌 **Gợi ý phân tích (Nhóm hạt lơ lửng & Khí bền):**\n\n"
+            f"- **Tính phân tán:** {focus_pollutant} có khả năng phát tán xa theo chiều gió.\n"
+            f"- Nếu mức chênh lệch (Max-Min = {diff:.1f}) giữa các trạm tương đối nhỏ, chứng tỏ ô nhiễm là vấn đề vùng (regional). Ngược lại, mức chênh lệch lớn này chỉ ra có nguồn xả thải cực mạnh ngay tại **{worst_station['Region']}**."
+        )
+    else:
+        st.info(
+            f"📌 **Gợi ý phân tích (Nhóm khí phản ứng nhanh):**\n\n"
+            f"- **Đặc tính cục bộ:** Các khí như {focus_pollutant} thường suy giảm rất nhanh theo khoảng cách tính từ nguồn phát.\n"
+            f"- Mức độ ô nhiễm cao tại **{worst_station['Location']}** phản ánh chính xác nguồn phát thải sơ cấp (mật độ xe/nhà máy) ngay tại tọa độ đó, hoặc là hệ quả của phản ứng quang hóa mạnh (như trường hợp O3)."
+        )
 
 st.markdown("---")
 
@@ -208,10 +221,16 @@ with col_chart1:
     cols_to_melt = [c for c in ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2'] if c in df_region.columns]
     df_region_melt = df_region.melt(id_vars='Region', value_vars=cols_to_melt, var_name='Pollutant', value_name='Concentration')
     
+    # Chuẩn hóa về % so với ngưỡng WHO để khắc phục lệch scale (CO quá lớn)
+    thresholds = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 40.0}
+    df_region_melt['Percent_WHO'] = df_region_melt.apply(
+        lambda row: (row['Concentration'] / thresholds.get(row['Pollutant'], 1)) * 100, axis=1
+    )
+    
     fig1 = px.bar(
         df_region_melt,
         x='Region',
-        y='Concentration',
+        y='Percent_WHO',
         color='Pollutant',
         barmode='group',
         color_discrete_map={
@@ -222,9 +241,11 @@ with col_chart1:
             'NO2': '#D98E04', 
             'SO2': '#2B7BBB'
         },
-        title="Nồng Độ TB Theo Loại Khu Vực",
-        labels={'Region': 'Khu vực', 'Concentration': 'Nồng độ (µg/m³)', 'Pollutant': 'Chất ô nhiễm'}
+        title="Mức Độ Ô Nhiễm So Với Ngưỡng WHO (%)",
+        labels={'Region': 'Khu vực', 'Percent_WHO': '% so với ngưỡng WHO', 'Pollutant': 'Chất ô nhiễm'},
+        hover_data={'Concentration': ':.1f'}
     )
+    fig1.add_hline(y=100, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO (100%)")
     st.plotly_chart(fig1, use_container_width=True)
     
 with col_chart2:
@@ -241,6 +262,35 @@ with col_chart2:
     if threshold > 0:
         fig3.add_hline(y=threshold, line_dash="dash", line_color="#FFB703", annotation_text="Ngưỡng WHO")
     st.plotly_chart(fig3, use_container_width=True)
+
+st.markdown("#### 💡 Insight Phân Bố & Biến Động")
+
+# Dynamic Insight for Dominant Pollutant (Bar Chart)
+dominant_insight = (
+    "📌 **Đánh giá rủi ro (Chất chi phối):** Dựa vào tỷ lệ % WHO, ta thấy nghịch lý không gian: "
+    "Khu Giao thông/Công nghiệp đối mặt trực diện với bụi mịn PM2.5 và NO2 từ quá trình đốt cháy. "
+    "Tuy nhiên, khu nền đô thị thoáng đãng (như Linh Trung) lại tiềm ẩn rủi ro 'sát thủ thầm lặng' O3 do điều kiện quang hóa mạnh và thiếu khí NO để phản ứng tiêu thụ lại O3."
+)
+
+# Dynamic Insight for Box Plot
+if focus_pollutant in ['PM2.5', 'CO', 'NO2']:
+    boxplot_insight = (
+        f"📌 **Mô hình xả thải ({focus_pollutant}):** Box plot phản ánh chu kỳ hoạt động đặc thù. "
+        "Hộp (IQR) rộng biểu thị khu vực chịu tác động mạnh của chu kỳ xả thải theo pha (ví dụ: kẹt xe giờ cao điểm). "
+        "Các điểm ngoại lai (outliers) là tín hiệu cảnh báo các đợt ùn tắc cục bộ hoặc sự kiện xả thải cấp tính bất thường."
+    )
+elif focus_pollutant == 'O3':
+    boxplot_insight = (
+        f"📌 **Mô hình xả thải (O3):** Sự phân tán (độ rộng IQR) của O3 phụ thuộc chặt chẽ vào chu kỳ bức xạ mặt trời trong ngày thay vì xả thải trực tiếp. "
+        "Các điểm ngoại lai (outliers) phía trên thường là dấu vết của những ngày nắng nóng gay gắt kéo dài, kích thích phản ứng quang hóa."
+    )
+else:
+    boxplot_insight = (
+        f"📌 **Mô hình xả thải ({focus_pollutant}):** Độ rộng của hộp (IQR) cho biết mức độ dao động nồng độ. "
+        "Hộp hẹp nghĩa là mức nền ô nhiễm tĩnh, tích tụ đều đặn. Hộp rộng và nhiều Outliers là dấu hiệu của sự gián đoạn trong mô hình xả thải hoặc thời tiết."
+    )
+
+st.info(dominant_insight + "\n\n" + boxplot_insight)
 
 st.subheader(f"🔥 Diễn Biến {focus_pollutant} Theo Thời Gian")
 df_filtered['Month_Year'] = df_filtered['Date'].dt.to_period('M').astype(str)
@@ -272,5 +322,47 @@ else:
     else:
         st.info("🕒 Vui lòng chọn khoảng thời gian lớn hơn 1 ngày để xem Heatmap Diễn biến.")
 
+st.info(
+    f"📌 **Bóc tách Vĩ mô và Vi mô qua Heatmap ({focus_pollutant}):**\n\n"
+    f"- **Đồng bộ (Trục dọc sậm màu):** Nếu nhiều trạm cùng sậm màu vào một thời điểm, tác nhân chi phối là **Vĩ mô** (ví dụ: bước vào mùa khô, nghịch nhiệt diện rộng khóa chặt ô nhiễm).\n"
+    f"- **Cục bộ (Trục ngang sậm màu):** Nếu chỉ 1 trạm sậm màu kéo dài trong khi các trạm khác sạch, tác nhân là **Vi mô** (ví dụ: công trình xây dựng mới, thay đổi luồng giao thông quanh trạm đó)."
+)
+
 st.markdown("---")
 st.caption("Dữ liệu đã được xử lý missing theo time interpolation theo từng trạm; giữ outlier; hiệu chỉnh bất nhất PM2.5 > TSP theo tỷ lệ PM2.5/TSP tham chiếu.")
+
+def render_conclusion():
+    st.markdown("### 💡 Kết luận: Bài toán Quy hoạch & Quản lý Không gian")
+    st.markdown(
+        """
+        <div style="
+            background: linear-gradient(135deg, #F0F4F8 0%, #E2E8F0 100%);
+            border-left: 5px solid #2B7BBB;
+            border-radius: 8px;
+            padding: 24px 28px;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #1E293B;
+            line-height: 1.8;
+            margin-bottom: 2rem;
+            margin-top: 1rem;
+        ">
+            <h4 style="margin-top:0; color:#0F172A;">
+                🏙️ Không gian ô nhiễm có tính phân mảnh cao — Đòi hỏi giải pháp cục bộ
+            </h4>
+            <ul style="margin-bottom: 0;">
+                <li>
+                    <b>Nguồn phát thải định hình bản đồ ô nhiễm</b>: Mạng lưới quan trắc cho thấy ô nhiễm không đồng nhất. Trạm <i>Giao thông (Quận 3, Bình Tân)</i> và <i>Công nghiệp (Tân Bình)</i> là các điểm nóng về hạt lơ lửng (PM2.5, TSP) và khí thải đốt cháy (CO, NO2).
+                </li>
+                <li>
+                    <b>Nghịch lý O3 ở ngoại ô</b>: Các trạm nền đô thị (như ĐHQG Linh Trung) tuy xa trung tâm nhưng lại là "rốn" của O3. Điều này phản ánh sự lan truyền tiền chất ô nhiễm từ nội đô kết hợp với không gian mở thuận lợi cho phản ứng quang hóa.
+                </li>
+                <li>
+                    <b>Hệ quả cho chính sách</b>: Các biện pháp cấm xe hay hạn chế phát thải cần được thiết kế <i>chuyên biệt cho từng cụm không gian</i> (Zoning). Việc chỉ áp dụng một chuẩn chung cho toàn thành phố sẽ kém hiệu quả do chênh lệch phơi nhiễm giữa các khu vực là rất lớn.
+                </li>
+            </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+render_conclusion()
