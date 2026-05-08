@@ -61,6 +61,13 @@ def load_data(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     df = _build_datetime(df)
     df = df.dropna(subset=["datetime"])
+
+    # Đồng bộ với Goal 1: loại bỏ flag=2 (sensor offline/NaN)
+    # Giữ lại flag=0 (tin cậy) và flag=1 (hợp lệ, chưa xác nhận đầy đủ)
+    flag_cols = [c for c in df.columns if c.endswith("_flag")]
+    if flag_cols:
+        df = df[(df[flag_cols] <= 1).all(axis=1)]
+
     df = df.sort_values(["Station_No", "datetime"]).reset_index(drop=True)
     # Chuyển đổi cột Date sang kiểu date thuần túy để hỗ trợ groupby theo ngày
     df["Date"] = df["datetime"].dt.date
