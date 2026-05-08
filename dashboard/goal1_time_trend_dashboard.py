@@ -19,7 +19,7 @@ from scipy import stats
 from scipy.stats import gaussian_kde
 
 # ── Constants ────────────────────────────────────────────────────────────────
-DATA_PATH = Path("data/cleaned/Air_Quality_HCMC_Cleaned.csv")
+DATA_PATH = Path(__file__).parent.parent / "data" / "cleaned" / "Air_Quality_HCMC_Cleaned.csv"
 
 # All flag columns in the dataset — rows where ANY flag ≠ 0 are dirty data
 FLAG_COLS = [
