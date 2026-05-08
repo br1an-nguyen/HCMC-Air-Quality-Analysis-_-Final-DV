@@ -62,8 +62,8 @@ Dữ liệu PM2.5 từ dataset này đã được sử dụng để xây dựng 
 * **Lý do chọn**: Tại TP.HCM, CO và NO2 chủ yếu sinh ra từ khói xe cộ. So sánh sự đồng biến giữa chúng giúp kiểm chứng nguồn phát thải chính.
 * **Giá trị mang lại**: Cung cấp góc nhìn định lượng về nguyên nhân cốt lõi gây ô nhiễm (vd: giao thông so với công nghiệp).
 
-**Mục tiêu 5: Phân tích Rủi ro Sức khỏe và Đặc tính Nguồn phát Bụi**
+**Mục tiêu 5: Phân tích Rủi ro Sức khỏe** 
 
-* **Số liệu dùng:** `PM2.5`, `TSP` (Tạo thêm biến phái sinh: Tỷ lệ `PM2.5/TSP`), `Station_No`, `Date`.
-* **Lý do chọn:** Đánh giá mức độ độc hại thực tế của môi trường bằng cách đối chiếu tần suất nồng độ PM2.5 vượt ngưỡng an toàn của WHO (15 µg/m³). Sử dụng tỷ lệ `PM2.5/TSP` làm chỉ báo để nhận diện bản chất ô nhiễm.
-* **Giá trị mang lại:** Cung cấp bức tranh định lượng về tỷ lệ thời gian người dân phải tiếp xúc với không khí nguy hại. Đồng thời, việc nhận diện đúng đặc tính ô nhiễm tại từng khu vực sẽ là cơ sở khoa học để đề xuất các giải pháp kiểm soát phát thải và quy hoạch đô thị sát với thực tiễn.
+* **Số liệu dùng:** `PM2.5`, `Station_No`, `Date`.
+* **Lý do chọn:** Đánh giá mức độ độc hại thực tế của môi trường bằng cách đối chiếu tần suất nồng độ PM2.5 vượt ngưỡng an toàn của WHO (15 µg/m³).
+* **Giá trị mang lại:** Cung cấp bức tranh định lượng về tỷ lệ thời gian người dân phải tiếp xúc với không khí nguy hại.
