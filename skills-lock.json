@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "data-analysis": {
+      "source": "seb1n/awesome-ai-agent-skills",
+      "sourceType": "github",
+      "skillPath": "data-and-analytics/data-analysis/SKILL.md",
+      "computedHash": "7fb59b474e2b7d8c83f92ab1a055a003393af328a90fe101a82c3989caa5260f"
+    },
+    "data-visualization": {
+      "source": "seb1n/awesome-ai-agent-skills",
+      "sourceType": "github",
+      "skillPath": "data-and-analytics/data-visualization/SKILL.md",
+      "computedHash": "af8cd36b5ac8455d360905267f39553455b10c9dfa285a1b01b32634deeb3dcb"
+    }
+  }
+}
