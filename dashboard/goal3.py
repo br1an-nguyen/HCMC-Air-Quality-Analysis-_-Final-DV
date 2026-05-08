@@ -293,7 +293,7 @@ def render_section3(df):
     hourly_so2 = df_so2.groupby("Hour")[WEATHER + POLLUTANTS].mean()
 
     # ── Row 1: PM2.5 ──
-    st.markdown("#### 🔍 Nghịch lý PM2.5")
+    st.markdown("#### 🔍 Nghịch lý PM2.5 & O3")
     r1c1, r1c2 = st.columns(2)
     with r1c1:
         pm_peak_h = hourly_pm_o3["PM2.5"].idxmax()
