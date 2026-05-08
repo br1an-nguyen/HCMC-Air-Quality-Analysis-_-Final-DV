@@ -4,6 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from itertools import combinations
+import os
 
 # ── Design tokens ─────────────────────────────────────────────────────────────
 C = {
@@ -312,10 +313,6 @@ def main():
           <div style='color:white;font-size:14px;font-weight:700;'>HCMC Air Quality</div>
         </div>""", unsafe_allow_html=True)
 
-        st.markdown("**Dữ liệu**")
-        uploaded = st.file_uploader("Tải CSV", type="csv",
-                                     help="Air_Quality_HCMC_Cleaned.csv")
-        st.markdown("---")
         st.markdown("**Bộ lọc**")
         station_ph = st.empty()
         date_ph    = st.empty()
@@ -331,14 +328,13 @@ def main():
                     "Outlier: giữ lại</div>", unsafe_allow_html=True)
 
     # ── Load & Filter ─────────────────────────────────────────────────────────────
-    if uploaded:
-        df_raw = load_data(uploaded)
+    paths = ["Air_Quality_HCMC_Cleaned.csv", "data/cleaned/Air_Quality_HCMC_Cleaned.csv", "../data/cleaned/Air_Quality_HCMC_Cleaned.csv"]
+    path = next((p for p in paths if os.path.exists(p)), None)
+    if path:
+        df_raw = load_data(path)
     else:
-        try:
-            df_raw = load_data("Air_Quality_HCMC_Cleaned.csv")
-        except FileNotFoundError:
-            st.warning("⚠️ Chưa có file. Vui lòng upload CSV ở sidebar.")
-            st.stop()
+        st.warning("⚠️ Không tìm thấy file dữ liệu hệ thống (Air_Quality_HCMC_Cleaned.csv).")
+        st.stop()
 
     all_stations = sorted(df_raw["Station_No"].unique())
     sel_stations = station_ph.multiselect("Trạm đo", all_stations, default=all_stations,
