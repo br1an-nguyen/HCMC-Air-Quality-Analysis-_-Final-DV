@@ -1,23 +1,37 @@
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+import plotly.express as px
 
-# Load dữ liệu
+# Đọc dữ liệu
 df = pd.read_csv('data/cleaned/Air_Quality_HCMC_Cleaned.csv')
 
-# Lọc dữ liệu lỗi
-df['PM2.5'] = df.apply(lambda row: np.nan if row['PM2.5_flag'] != 0 else row['PM2.5'], axis=1)
-df['O3'] = df.apply(lambda row: np.nan if row['O3_flag'] != 0 else row['O3'], axis=1)
+# Metadata trạm
+stations_meta = pd.DataFrame([
+    {'Station_No': 1, 'Location': 'VNU Linh Trung', 'Region': 'Urban background', 'Lat': 10.8699, 'Lon': 106.7960},
+    {'Station_No': 2, 'Location': 'Binh Tan', 'Region': 'Traffic', 'Lat': 10.7410, 'Lon': 106.6171},
+    {'Station_No': 3, 'Location': 'Tan Binh IP', 'Region': 'Industry', 'Lat': 10.8162, 'Lon': 106.6204},
+    {'Station_No': 4, 'Location': 'Thanh Da', 'Region': 'Residential', 'Lat': 10.8158, 'Lon': 106.7174},
+    {'Station_No': 5, 'Location': 'District 3', 'Region': 'Traffic', 'Lat': 10.7764, 'Lon': 106.6878},
+    {'Station_No': 6, 'Location': 'District 10', 'Region': 'Traffic + Residential', 'Lat': 10.7805, 'Lon': 106.6595}
+])
 
-# Tính trung bình nồng độ PM2.5 và O3 mỗi ngày
-daily_avg = df.groupby('Date')[['PM2.5', 'O3']].mean()
+# Lọc dữ liệu năm 2022
+df['Date'] = pd.to_datetime(df['Date'])
+df_2022 = df[df['Date'].dt.year == 2022].copy()
 
-# Vẽ biểu đồ phân tích
-plt.figure(figsize=(10,6))
-plt.plot(daily_avg['PM2.5'], label='PM2.5')
-plt.plot(daily_avg['O3'], label='O3')
-plt.xlabel('Ngày')
-plt.ylabel('Nồng độ (µg/m³)')
-plt.title('Phân tích Nghịch lý PM2.5 & O3')
-plt.legend()
-plt.show()
+# Lọc bỏ dữ liệu lỗi (flag > 1) cho PM2.5
+df_clean = df_2022[df_2022['PM2.5_flag'] <= 1].copy()
+
+# Tính trung bình PM2.5 theo ngày và trạm
+df_daily = df_clean.groupby(['Date', 'Station_No'])['PM2.5'].mean().reset_index()
+
+# Merge với metadata để lấy tên trạm
+df_daily = df_daily.merge(stations_meta, on='Station_No')
+
+# Tạo biểu đồ Dumbbell so sánh khoảng giá trị PM2.5 giữa các trạm
+fig = px.box(df_daily, x='Location', y='PM2.5', color='Location',
+             title='Phân bổ PM2.5 tại các trạm năm 2022 (µg/m³)',
+             labels={'PM2.5': 'Nồng độ PM2.5 (µg/m³)'})
+
+# Thêm đường ngưỡng WHO 2021
+fig.add_hline(y=15, line_dash="dash", line_color="red", annotation_text="WHO 2021 (15 µg/m³)")
+fig.show()
