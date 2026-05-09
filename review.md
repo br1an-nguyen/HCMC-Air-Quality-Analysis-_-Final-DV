@@ -1,188 +1,128 @@
-Đọc xong toàn bộ code. Để tôi đối chiếu hệ thống từng lỗi trong review cũ và đánh giá code mới.
+
+# Báo Cáo Đánh Giá Code — Dashboard P03 (Phiên Bản Mới Nhất)
 
 ---
 
-## ✅ Những gì đã được sửa đúng
+## TIÊU CHÍ 1 — Kiểm Tra Logic Ngưỡng WHO
 
-| # | Lỗi cũ | Trạng thái | Vị trí |
-|---|---|---|---|
-| 1 | PM2.5 kết luận ngược | ✅ Sửa đúng | `render_conclusion()` line 382 |
-| 2 | O3 gán sai địa chỉ | ✅ Sửa đúng | `render_conclusion()` line 385 |
-| 3 | Cơ chế NO-O3 sai chiều | ✅ Sửa đúng | Line 385–386 |
-| 4 | KPI 2 hardcode TSP | ✅ Sửa đúng | Line 122–136 |
-| 5 | Bar chart không filter flag | ✅ Sửa đúng | Line 228–239 (loop từng pollutant) |
-| 6 | Static insight | ✅ Sửa đúng | Line 290–301 |
-| 7 | Box plot 1 màu | ✅ Sửa đúng | Line 281 dùng `Pastel` |
-| 8 | Anomaly Trạm 5 | ✅ Có cảnh báo | Line 99 `st.warning()` |
+### ✅ Đúng (2/6 chất)
 
-Tất cả 8 lỗi từ review đã được xử lý. Tuy nhiên có **4 vấn đề mới** và **2 đề xuất chart** cần xem xét.
+| Chất | Ngưỡng code | WHO AQG 2021 24h | Kết luận                                                                          |
+| ----- | ------------- | ---------------- | ----------------------------------------------------------------------------------- |
+| PM2.5 | 15.0 µg/m³  | 15.0 µg/m³     | ✅ Chính xác                                                                      |
+| SO2   | 40.0 µg/m³  | 40.0 µg/m³     | ✅ Chính xác (nhưng dữ liệu SO2 có anomaly nghiêm trọng — xem bên dưới) |
 
----
+### ❌ Sai hoặc không có cơ sở (3/6 chất)
 
-## 🟠 Vấn đề mới phát hiện
+**O3 = 100 µg/m³ — Sai metric đầu vào:**
+Ngưỡng 100 µg/m³ của WHO là chuẩn  **8-hour peak average** , không phải 24h mean. Code tính `df_daily = groupby([..., Date_only]).mean()` — tức là trung bình 24 giờ — rồi so sánh con số đó với 100. Đây là hai đại lượng khác nhau về định nghĩa. Kết quả: tỷ lệ vượt ngưỡng của Bình Tân (70.9% ngày) và Linh Trung (56.8% ngày) không thể diễn giải là "vượt chuẩn WHO" một cách hợp lệ.
 
-### 1. `px.density_heatmap` dùng sai mục đích — Line 328, 341
+**CO = 10,000 µg/m³ — Không khớp với bất kỳ chuẩn nào:**
+WHO 24h CO = **4,000 µg/m³** (4 mg/m³). QCVN 05:2023 24h CO =  **30,000 µg/m³** . Con số 10,000 trong code không có nguồn gốc chuẩn rõ ràng. Hậu quả: toàn bộ 6 trạm đều hiển thị CO "an toàn" (max ~1,342 µg/m³ << 10,000), nhưng nếu dùng ngưỡng WHO thực (4,000) thì kết luận vẫn không đổi — CO thực tế rất thấp so với mọi chuẩn.
 
-```python
-# Hiện tại: df_timespace đã là dữ liệu tổng hợp (mean theo tháng)
-fig_heat = px.density_heatmap(
-    df_timespace,
-    x='Month_Year', y='Location', z=focus_pollutant,
-    ...
-)
-```
+**TSP = 50 µg/m³ — Không có cơ sở WHO:**
+WHO 2021 AQG không ban hành ngưỡng TSP 24h. QCVN 05:2023 quy định TSP 24h =  **150 µg/m³** . Code dùng 50 µg/m³ không tham chiếu được về nguồn chuẩn, dẫn đến 3 trạm (Thanh Đa, Linh Trung, KCN Tân Bình) bị đánh dấu "vượt ngưỡng" trên biểu đồ theo một mức không chính thức.
 
-`px.density_heatmap` được thiết kế để **đếm tần suất/histogram 2D**, không phải hiển thị giá trị đã tổng hợp. Nó sẽ tự aggregate lại `z` theo `histfunc` mặc định — có thể gây hiển thị sai.
+### ⚠️ Vấn đề phương pháp luận trong KPI4
 
-**Sửa:** Dùng `go.Heatmap()` hoặc `px.imshow()` với pivot table:
+KPI4 tính `n_exceed` từ `map_data` — là **median của daily means** theo trạm. Đây không phải định nghĩa chuẩn WHO (WHO áp dụng threshold cho từng ngày quan trắc 24h riêng lẻ). Cách đúng là đếm số ngày `daily_mean > threshold`, sau đó báo cáo tỷ lệ. Giá trị thực từ dữ liệu:
 
-```python
-pivot = df_timespace.pivot(index='Location', columns='Month_Year', values=focus_pollutant)
+| Trạm            | PM2.5 — % ngày vượt WHO 15 µg/m³ |
+| ---------------- | -------------------------------------- |
+| Thanh Đa        | **90.7%**ngày                         |
+| ĐHQG Linh Trung | 79.4% ngày                            |
+| KCN Tân Bình   | 73.1% ngày                            |
+| Bình Tân       | 66.2% ngày                            |
+| Quận 10         | 65.4% ngày                            |
+| Quận 3          | 47.3% ngày                            |
 
-fig_heat = px.imshow(
-    pivot,
-    color_continuous_scale="Reds",
-    aspect="auto",
-    labels=dict(x="Tháng/Năm", y="Trạm quan trắc", color=f"{focus_pollutant} (µg/m³)"),
-    title=f"Heatmap Diễn Biến {focus_pollutant} Theo Thời Gian và Trạm"
-)
-```
+KPI4 hiện chỉ báo "5/6 trạm" mà không truyền đạt được mức độ nghiêm trọng (gần như 365 ngày vượt chuẩn tại Thanh Đa). Đây là thông tin quan trọng bị ẩn đi.
 
 ---
 
-### 2. KPI 2 tính từ `df` (toàn bộ) thay vì `df_filtered` — Line 125–129
+## TIÊU CHÍ 2 — Kiểm Tra Logic Các Chart
 
-```python
-# KPI 2 dùng df gốc, không theo date/station filter của user
-df_network = df[df[flag_col] == 0]
-network_mean = df_network[focus_pollutant].mean()
-```
+### Chart 1: Ranked Horizontal Bar — ✅ Logic Đúng
 
-Nếu user lọc chỉ còn 3 tháng mùa khô hoặc 3 trạm, KPI 2 vẫn hiện trung bình **toàn bộ dữ liệu**. Không có label nào giải thích điều này — gây ảo giác so sánh sai.
+`sort_values(ascending=True)` với `orientation='h'` cho ra thanh thấp nhất ở trên cùng, cao nhất ở dưới cùng — đúng với quy ước đọc biểu đồ ngang. Màu đỏ highlight "Vượt ngưỡng" hoạt động đúng. Không có lỗi logic.
 
-**Sửa:** Tính từ `df_filtered` và thêm note thời gian:
+### Chart 2: Facet Bar (% WHO) — ⚠️ 2 vấn đề cần sửa
 
-```python
-network_mean = df_filtered[focus_pollutant].mean()
-# label: "Trung bình (khoảng lọc)"
-```
+**Vấn đề 1 — Comment sai so với code:**
+Dòng comment viết `# Tính mean cho từng chất` nhưng code thực tế dùng `df_r[p].median()`. Đây là median-of-daily-means, không phải mean. Cần thống nhất cả code lẫn label trên chart (hiện chart không ghi rõ là mean hay median).
 
----
+**Vấn đề 2 — Pooling Region che khuất sự khác biệt nội vùng:**
+Khu "Giao thông" gộp cả Bình Tân (PM2.5 median = 16.86) và Quận 3 (PM2.5 median = 14.33) thành một thanh duy nhất. Hai trạm này có profile khác nhau rõ rệt — Quận 3 là trạm duy nhất không vượt WHO về PM2.5, trong khi Bình Tân vượt 12%. Facet theo Region làm mất thông tin này. Đây là chart thể hiện `Profile theo Khu vực`, không phải `Profile theo Trạm`, nên cần ghi rõ trong title rằng các trạm cùng region đã được gộp.
 
-### 3. Đoạn cuối `dominant_insight` vẫn bán hardcode — Line 300
+**Vấn đề 3 — SO2 và NO2 làm nhiễu dominant_insight:**
+`idxmax()` trả về SO2 tại Nền đô thị (679% WHO) vì dữ liệu SO2 toàn mạng có median 150–340 µg/m³ — gần như chắc chắn là lỗi đơn vị hoặc drift thiết bị. NO2 tại Quận 3 đạt 1,091% WHO do anomaly bimodal đã được cảnh báo trước đó. Kết quả là câu `dominant_insight` tự động in ra *"SO2 tại Nền đô thị chiếm tỷ trọng cao nhất"* — một kết luận hoàn toàn sai về mặt môi trường và xuất phát từ artifact dữ liệu, không phải thực tế.
 
-```python
-dominant_insight = (
-    f"...chất chi phối rủi ro sức khỏe chính là **{dominant_pollutant}** tại khu vực **{dominant_region}**. "
-    f"Điều này phản ánh sự khác biệt về nguồn phát thải (ví dụ: PM2.5/NO2 từ đốt cháy tại Giao thông/Công nghiệp, "
-    f"hay O3 từ quang hóa tại Nền đô thị)."  # <-- CỨNG
-)
-```
+### Chart 3: Box Plot — ✅ Logic Đúng, 1 Insight Sai
 
-Phần ví dụ trong ngoặc không thay đổi theo `dominant_region`. Nếu `dominant_region = "Dân cư"` và `dominant_pollutant = "PM2.5"`, câu "PM2.5/NO2 từ đốt cháy tại Giao thông/Công nghiệp" không còn phù hợp.
+Input `df_daily` (daily means) là đúng cho box plot. Tuy nhiên `boxplot_insight` báo **KCN Tân Bình** có IQR lớn nhất (14.60 µg/m³) — đây là **đúng** theo dữ liệu. Code tính IQR trực tiếp từ `df_daily.groupby('Location').quantile()` — chính xác.
 
-**Sửa:** Map cơ chế theo pollutant động:
+### Chart 4: Radar Chart — ✅ Logic Đúng, ⚠️ Cần Chú Thích
 
-```python
-mechanism_map = {
-    'PM2.5': 'tích lũy từ đốt cháy và bụi đường',
-    'O3': 'quang hóa thứ cấp dưới bức xạ mặt trời',
-    'NO2': 'xả thải từ phương tiện và đốt nhiên liệu',
-    'CO': 'đốt cháy không hoàn toàn (xe máy, xe tải)',
-    'SO2': 'đốt than/dầu tại khu công nghiệp',
-    'TSP': 'bụi đường và hoạt động xây dựng'
-}
-mechanism = mechanism_map.get(dominant_pollutant, 'nguồn phát thải đặc thù')
-dominant_insight = (
-    f"...chất chi phối là **{dominant_pollutant}** tại **{dominant_region}**, "
-    f"chủ yếu do {mechanism}."
-)
-```
+Logic hiển thị worst/best station theo `focus_pollutant` là đúng. Kỹ thuật **Cap & Annotate** (ép trục 200%, hiển thị text cảnh báo khi vượt) là giải pháp hợp lý cho vấn đề SO2/NO2 anomaly. Tuy nhiên:
+
+Khi `focus_pollutant = PM2.5`: worst = Thanh Đa, best = Quận 3. Quận 3 có NO2 = 1,091% WHO và SO2 = 876% WHO (đều bị cap tại 200%). Người xem sẽ thấy Quận 3 có hình đa giác "nhỏ hơn" Thanh Đa — nhưng thực tế Quận 3 có hình radar cực kỳ bất thường do anomaly. Câu insight *"Quận 3 là trạm sạch nhất"* cần đi kèm disclaimer rõ ràng hơn là chỉ dùng `st.warning` ở đầu trang.
+
+### Chart 5: Day/Night Dot Plot — ✅ Logic Đúng, 1 Insight Cần Cập Nhật
+
+Logic phát hiện "Đêm > Ngày" và highlight bằng border đỏ là đúng. Dữ liệu thực xác nhận:
+
+* **KCN Tân Bình** : Đêm (20.04) > Ngày (19.43) — PM2.5 cao hơn ban đêm
+* **ĐHQG Linh Trung** : Đêm (20.70) > Ngày (19.53) — PM2.5 cao hơn ban đêm
+
+Insight text cần đề cập cả hai trạm này. Tuy nhiên chênh lệch rất nhỏ (~0.6–1.2 µg/m³) — cần thêm lưu ý rằng sự khác biệt này có thể không có ý nghĩa thống kê và không nên diễn giải quá mức.
 
 ---
 
-### 4. Heatmap không có title — Line 328, 341
+## TIÊU CHÍ 3 — Đề Xuất Insight Thuần Dữ Liệu
 
-Cả hai nhánh `if/else` của heatmap đều thiếu `title=`. Đây là chart lớn nhất trang nhưng không có nhãn rõ ràng.
+### Insight Facet Bar (thay thế dominant_insight hiện tại)
 
-**Sửa:** Thêm vào `px.imshow()` (sau khi sửa lỗi 1):
+Loại SO2 và NO2 khỏi vòng tính dominant do anomaly. Với các chất còn lại:
 
-```python
-title=f"Diễn Biến {focus_pollutant} Theo Thời Gian & Trạm Quan Trắc"
-```
+> *"Nhìn trên hồ sơ % WHO (loại trừ SO2/NO2 do nghi vấn chất lượng đo lường): PM2.5 là chất chiếm tỷ trọng cao nhất tại khu Dân cư (162% WHO) và Công nghiệp (137% WHO). O3 là chất chiếm tỷ trọng cao nhất tại khu Giao thông (Bình Tân: 111% WHO). TSP vượt ngưỡng tham chiếu tại Dân cư (117%) và Nền đô thị (113%)."*
 
----
+### Insight Box Plot (cập nhật)
 
-## 🟢 Đề xuất chart bổ sung
+> *"KCN Tân Bình có biên độ dao động PM2.5 ngày lớn nhất (IQR = 14.6 µg/m³), gấp 2.0 lần so với Quận 3 (IQR = 7.2 µg/m³). Thanh Đa tuy có median cao nhất (24.3 µg/m³) nhưng IQR nhỏ hơn KCN Tân Bình (13.6 vs 14.6) — cho thấy mức ô nhiễm tại Thanh Đa cao nhưng ổn định, trong khi KCN Tân Bình dao động mạnh hơn theo ngày, phù hợp với tính chất hoạt động công nghiệp không đều."*
 
-### Đề xuất 1 — Radar Chart (Spider Chart) so sánh toàn diện các trạm
+### Insight Day/Night (cập nhật)
 
-**Lý do:** Bar chart hiện tại so sánh theo Region × Pollutant. Nhưng để thấy **profile ô nhiễm tổng thể của từng trạm** cùng lúc trên 6 chất, radar chart là lựa chọn tốt nhất. Đây cũng là chart duy nhất có thể trả lời câu hỏi: *"Trạm nào đa chiều nguy hiểm nhất?"*
-
-```python
-import plotly.graph_objects as go
-
-categories = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
-thresholds = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0,
-              "O3": 100.0, "SO2": 40.0, "NO2": 40.0}
-
-fig_radar = go.Figure()
-for _, row in map_data.iterrows():
-    # Lấy % WHO cho từng chất từ df_filtered theo station
-    station_df = df_filtered[df_filtered['Station_No'] == row['Station_No']]
-    values = []
-    for p in categories:
-        flag_col = f"{p}_flag"
-        if flag_col in station_df.columns:
-            v = station_df[station_df[flag_col] == 0][p].mean()
-        else:
-            v = station_df[p].mean()
-        values.append((v / thresholds[p]) * 100 if pd.notna(v) else 0)
-    
-    fig_radar.add_trace(go.Scatterpolar(
-        r=values + [values[0]],
-        theta=categories + [categories[0]],
-        fill='toself',
-        name=row['Location'],
-        opacity=0.6
-    ))
-
-fig_radar.update_layout(
-    polar=dict(radialaxis=dict(visible=True, range=[0, 200])),
-    title="Profile Ô Nhiễm Đa Chiều Theo Trạm (% WHO)"
-)
-```
+> *"KCN Tân Bình và ĐHQG Linh Trung là 2 trạm duy nhất trong mạng có PM2.5 trung vị ban đêm cao hơn ban ngày (chênh lệch lần lượt 0.6 và 1.2 µg/m³). Do chênh lệch nhỏ, cần thận trọng khi diễn giải. 4 trạm còn lại đều có nồng độ cao hơn ban ngày, nhất quán với nguồn phát thải giao thông tập trung vào giờ cao điểm."*
 
 ---
 
-### Đề xuất 2 — Ranked Horizontal Bar cho focus_pollutant
+## TIÊU CHÍ 4 — Kết Luận Tổng Thể (Thuần Dữ Liệu)
 
-**Lý do:** Map bubble hiện tại khó so sánh chênh lệch tuyệt đối giữa các trạm (vì kích thước bubble không tuyến tính trực quan). Một horizontal bar chart đơn giản xếp hạng trạm theo `focus_pollutant` với đường kẻ ngưỡng WHO sẽ là panel đọc nhanh hiệu quả hơn — đặt ngay dưới map.
-
-```python
-map_sorted = map_data.sort_values(focus_pollutant, ascending=True)
-fig_rank = px.bar(
-    map_sorted,
-    x=focus_pollutant,
-    y='Location',
-    color='Region',
-    orientation='h',
-    title=f"Xếp Hạng Trạm Theo {focus_pollutant}",
-    labels={'Location': '', focus_pollutant: f"{focus_pollutant} (µg/m³)"},
-    text_auto='.1f'
-)
-fig_rank.add_vline(x=threshold, line_dash="dash", line_color="#FFB703",
-                   annotation_text="Ngưỡng WHO")
-```
+> **Không gian ô nhiễm tại TPHCM có sự phân hóa rõ rệt theo đặc trưng khu vực, nhưng không theo chiều hướng thông thường:**
+>
+> **PM2.5 và TSP:** Khu Dân cư (Thanh Đa) — không phải Giao thông hay Công nghiệp — dẫn đầu về nồng độ bụi mịn toàn mạng, với median PM2.5 = 24.3 µg/m³ (162% WHO) và 90.7% số ngày vượt chuẩn 24h. KCN Tân Bình đứng thứ hai (20.6 µg/m³, 73.1% ngày). Trạm Giao thông ở Quận 3 là trạm duy nhất không vượt WHO PM2.5 (47.3% ngày, median = 14.3 µg/m³).
+>
+> **O3:** Phân bố không gian ngược chiều với PM2.5. Bình Tân (Giao thông) có O3 cao nhất (median 110.8 µg/m³, 70.9% ngày vượt 100 µg/m³), trong khi KCN Tân Bình có O3 thấp nhất (77.4 µg/m³, chỉ 5.9% ngày). Điều này cho thấy hai nhóm chất ô nhiễm có nguồn gốc và cơ chế sinh ra khác nhau theo không gian.
+>
+> **NO2 và SO2:** Dữ liệu tại Quận 3 và toàn mạng SO2 có dấu hiệu bất thường nghiêm trọng (NO2 Quận 3 median = 272.7 µg/m³, SO2 toàn mạng median 150–340 µg/m³). Không thể đưa ra kết luận không gian đáng tin cậy cho hai chất này từ dataset hiện tại.
+>
+> **Hàm ý chính sách (từ dữ liệu):** Nếu PM2.5 là ưu tiên can thiệp, Thanh Đa cần được xem xét trước, không phải các khu giao thông. Nếu O3 là ưu tiên, trọng tâm là Bình Tân và Linh Trung. Không có một chiến lược đồng nhất nào phù hợp với cả sáu trạm đồng thời — điều này được xác nhận bởi dữ liệu, không phải giả định.
 
 ---
 
-## 📋 Tổng kết
+## Tóm Tắt Ma Trận Đánh Giá
 
-| Loại | Số lượng | Ghi chú |
-|---|---|---|
-| Lỗi cũ đã sửa | 8/8 | Sửa đúng hướng, đầy đủ |
-| Vấn đề mới phát hiện | 4 | Lỗi heatmap (nghiêm trọng nhất), KPI2 scope, insight bán-cứng, thiếu title |
-| Đề xuất chart mới | 2 | Radar chart (ưu tiên cao), Ranked bar (ưu tiên trung bình) |
-
-Vấn đề cần sửa ngay nhất là **`px.density_heatmap`** — nó đang aggregate dữ liệu đã tổng hợp một lần nữa và nhiều khả năng hiển thị sai giá trị thực.
+| Hạng mục                               | Trạng thái                                         | Ưu tiên sửa                          |
+| ---------------------------------------- | ---------------------------------------------------- | --------------------------------------- |
+| PM2.5 threshold (15)                     | ✅ Đúng                                            | —                                      |
+| NO2 threshold (25)                       | ✅ Đúng                                            | —                                      |
+| SO2 threshold (40)                       | ✅ Đúng nhưng data anomaly                        | Thêm disclaimer mạnh hơn             |
+| O3 threshold — sai metric               | ❌ 24h mean ≠ 8h peak                               | 🔴 Sửa ngay                            |
+| TSP threshold — không có chuẩn       | ❌ 50 µg/m³ không có nguồn                      | 🔴 Ghi rõ nguồn hoặc đổi sang QCVN |
+| CO threshold — không khớp chuẩn nào | ❌                                                   | 🟠 Làm rõ nguồn                      |
+| Chart 1 (Ranked Bar)                     | ✅ Logic đúng                                      | —                                      |
+| Chart 2 (Facet % WHO)                    | ⚠️ Pooling + comment sai + dominant bị SO2 chiếm | 🔴 Sửa insight                         |
+| Chart 3 (Box Plot)                       | ✅ Logic đúng                                      | —                                      |
+| Chart 4 (Radar)                          | ✅ Đúng, cần disclaimer rõ hơn                  | 🟡 Cải thiện                          |
+| Chart 5 (Day/Night)                      | ✅ Logic đúng, insight cần cập nhật             | 🟡 Cập nhật text                      |
+| KPI4 exceedance                          | ⚠️ Median-of-stations thay vì % ngày vượt      | 🟠 Đề xuất bổ sung metric           |

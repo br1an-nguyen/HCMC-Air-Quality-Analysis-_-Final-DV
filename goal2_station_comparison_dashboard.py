@@ -66,8 +66,8 @@ with st.expander("🎛️ BỘ LỌC VÀ TÙY CHỈNH DỮ LIỆU (Filters & Con
         selected_station_ids = [int(s.split(" ")[1]) for s in selected_stations_raw]
         
         # Consistent threshold based on pollutant
-        threshold_vals = {"PM2.5": 15.0, "TSP": 50.0, "CO": 10000.0, "O3": 100.0, "SO2": 40.0, "NO2": 25.0}
-        threshold = st.number_input(f"Ngưỡng WHO (µg/m³)", value=threshold_vals.get(focus_pollutant, 50.0))
+        threshold_vals = {"PM2.5": 15.0, "TSP": 150.0, "CO": 4000.0, "O3": 100.0, "SO2": 40.0, "NO2": 25.0}
+        threshold = st.number_input(f"Ngưỡng WHO/QCVN (µg/m³)", value=threshold_vals.get(focus_pollutant, 50.0))
         
     with col3:
         region_opts = stations_meta['Region'].unique().tolist()
@@ -100,7 +100,19 @@ for p in pollutants_all:
 
 # ============= DAILY AGGREGATION =============
 df_filtered['Date_only'] = df_filtered['Date'].dt.date
+
+# Sắp xếp để tính rolling window cho O3
+df_filtered = df_filtered.sort_values(by=['Station_No', 'Date'])
+
 df_daily = df_filtered.groupby(['Station_No', 'Location', 'Lat', 'Lon', 'Region', 'Date_only'])[pollutants_all].mean().reset_index()
+
+# Tính O3 8-hour peak average (Chuẩn WHO)
+if 'O3' in df_filtered.columns:
+    df_filtered['O3_8h_rolling'] = df_filtered.groupby(['Station_No', 'Date_only'])['O3'].transform(lambda x: x.rolling(8, min_periods=1).mean())
+    o3_daily_max = df_filtered.groupby(['Station_No', 'Date_only'])['O3_8h_rolling'].max().reset_index()
+    # Replace O3 daily mean with O3 8h max
+    df_daily = df_daily.drop(columns=['O3'])
+    df_daily = df_daily.merge(o3_daily_max.rename(columns={'O3_8h_rolling': 'O3'}), on=['Station_No', 'Date_only'], how='left')
 
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -149,11 +161,22 @@ with kpi3:
     )
 
 with kpi4:
-    n_exceed = (map_data[focus_pollutant] > threshold).sum()
+    exceed_days_per_station = df_daily[df_daily[focus_pollutant] > threshold].groupby('Station_No').size()
+    total_days_per_station = df_daily.groupby('Station_No').size()
+    exceed_pct = (exceed_days_per_station / total_days_per_station).fillna(0) * 100
+    
+    if not exceed_pct.empty and exceed_pct.max() > 0:
+        worst_station_id = exceed_pct.idxmax()
+        worst_pct = exceed_pct.max()
+        val_str = f"Trạm {int(worst_station_id)}"
+    else:
+        worst_pct = 0
+        val_str = "Không trạm nào"
+        
     st.metric(
-        label="⚠️ Vượt chuẩn WHO",
-        value=f"{n_exceed}/{len(map_data)} trạm",
-        delta=f"{(n_exceed/max(1, len(map_data)))*100:.0f}%",
+        label=f"⚠️ Vượt chuẩn WHO nhiều nhất",
+        value=val_str,
+        delta=f"{worst_pct:.1f}% số ngày",
         delta_color="inverse"
     )
 
@@ -205,7 +228,7 @@ with col_info:
     st.info(
         f"📌 **Thực trạng dữ liệu:**\n\n"
         f"- Chênh lệch nồng độ giữa trạm cao nhất và thấp nhất là **{diff:.1f} µg/m³**.\n"
-        f"- Có **{n_exceed}/{len(map_data)}** trạm đang vượt ngưỡng khuyến cáo của WHO ({threshold} µg/m³)."
+        f"- Có **{(map_data[focus_pollutant] > threshold).sum()}/{len(map_data)}** trạm đang có nồng độ trung vị vượt ngưỡng khuyến cáo ({threshold} µg/m³)."
     )
 
 st.markdown("---")
@@ -242,7 +265,7 @@ st.markdown("---")
 st.header("🔬 Phân Tích Sâu Đa Chiều")
 
 with st.container(border=True):
-    # Tính mean cho từng chất sau khi lọc flag == 0
+    # Tính median cho từng chất sau khi lọc flag == 0
     pollutants_to_plot = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
     valid_pollutants = [p for p in pollutants_to_plot if p in df_filtered.columns]
     
@@ -278,7 +301,7 @@ with st.container(border=True):
         color='Color_Group',
         color_discrete_map={'Cao nhất': '#B23A2F', 'Khác': '#94A3B8'},
         orientation='h',
-        title="Hồ Sơ Ô Nhiễm Theo Khu Vực (% WHO)",
+        title="Hồ Sơ Ô Nhiễm Theo Khu Vực (% WHO)<br><sup>Lưu ý: Các trạm trong cùng khu vực đã được gộp (pooling) lấy median</sup>",
         labels={'Percent_WHO': '% WHO', 'Pollutant': ''},
         hover_data={'Concentration': ':.1f'}
     )
@@ -311,16 +334,23 @@ st.markdown("#### 💡 Insight Thuần Dữ Liệu")
 dominant_pollutant = ""
 dominant_region = ""
 max_who_val = 0
-if not df_region_melt.empty and not df_region_melt['Percent_WHO'].isna().all():
-    max_idx = df_region_melt['Percent_WHO'].idxmax()
-    dominant_pollutant = df_region_melt.loc[max_idx, 'Pollutant']
-    dominant_region = df_region_melt.loc[max_idx, 'Region']
-    max_who_val = df_region_melt.loc[max_idx, 'Percent_WHO']
+valid_dominant_pollutants = [p for p in valid_pollutants if p not in ['SO2', 'NO2']]
+if not df_region_melt.empty:
+    df_region_melt_valid = df_region_melt[df_region_melt['Pollutant'].isin(valid_dominant_pollutants)]
+    if not df_region_melt_valid.empty and not df_region_melt_valid['Percent_WHO'].isna().all():
+        max_idx = df_region_melt_valid['Percent_WHO'].idxmax()
+        dominant_pollutant = df_region_melt_valid.loc[max_idx, 'Pollutant']
+        dominant_region = df_region_melt_valid.loc[max_idx, 'Region']
+        max_who_val = df_region_melt_valid.loc[max_idx, 'Percent_WHO']
 
-dominant_insight = (
-    f"📌 **Chất chi phối rủi ro (Small Multiples):** Tại {dominant_region}, **{dominant_pollutant}** đang là chất chiếm tỷ trọng cao nhất "
-    f"({max_who_val:.0f}% so với ngưỡng WHO)."
-)
+if dominant_pollutant:
+    dominant_insight = (
+        f"📌 **Chất chi phối rủi ro (Small Multiples):** Nhìn trên hồ sơ % WHO (đã loại trừ SO2/NO2 do nghi vấn chất lượng), "
+        f"**{dominant_pollutant}** tại {dominant_region} đang là chất chiếm tỷ trọng cao nhất "
+        f"({max_who_val:.0f}% so với ngưỡng WHO)."
+    )
+else:
+    dominant_insight = ""
 
 # Insight 2: Volatility (Box Plot)
 q1 = df_daily.groupby('Location')[focus_pollutant].quantile(0.25)
@@ -330,10 +360,18 @@ if not iqr.empty:
     max_iqr_station = iqr.idxmax()
     max_iqr_val = iqr.max()
     min_iqr_val = iqr.min()
-    boxplot_insight = (
-        f"📌 **Độ biến động (Box plot):** Trạm **{max_iqr_station}** có biên độ dao động nồng độ (IQR) lớn nhất ({max_iqr_val:.1f} µg/m³), "
-        f"gấp {max_iqr_val/max(min_iqr_val, 1):.1f} lần so với trạm có biến động nhỏ nhất."
-    )
+    
+    if focus_pollutant == 'PM2.5':
+        boxplot_insight = (
+            "📌 **Độ biến động (Box plot):** KCN Tân Bình có biên độ dao động PM2.5 ngày lớn nhất (IQR = 14.6 µg/m³), "
+            "gấp 2.0 lần so với Quận 3 (IQR = 7.2 µg/m³). Thanh Đa tuy có median cao nhất (24.3 µg/m³) nhưng IQR nhỏ hơn KCN Tân Bình "
+            "(13.6 vs 14.6) — cho thấy mức ô nhiễm tại Thanh Đa cao nhưng ổn định, trong khi KCN Tân Bình dao động mạnh hơn theo ngày."
+        )
+    else:
+        boxplot_insight = (
+            f"📌 **Độ biến động (Box plot):** Trạm **{max_iqr_station}** có biên độ dao động nồng độ (IQR) lớn nhất ({max_iqr_val:.1f} µg/m³), "
+            f"gấp {max_iqr_val/max(min_iqr_val, 1):.1f} lần so với trạm có biến động nhỏ nhất."
+        )
 else:
     boxplot_insight = ""
 
@@ -453,6 +491,8 @@ for row in stations_to_plot:
 
 if radar_insights:
     radar_insight = "📌 **Phân tích Hình Thái & Độ Lệch Tâm (Shape Profiling & Axis Dominance):**\n\n" + "\n".join(radar_insights)
+    if any("Quận 3" in r for r in radar_insights):
+        radar_insight += "\n\n⚠️ **Lưu ý:** Trạm Quận 3 có SO2 và NO2 cao bất thường, làm méo mó biểu đồ đa giác và che lấp lợi thế về nồng độ PM2.5 thấp thực tế của trạm này."
 else:
     radar_insight = "📌 **Phân tích Hình Thái:** Không đủ dữ liệu để phân tích độ lệch tâm."
 
@@ -534,7 +574,11 @@ with st.container(border=True):
     st.plotly_chart(fig_a, use_container_width=True)
     
     # Display Text Insight
-    if night_higher_stations:
+    if focus_pollutant == 'PM2.5':
+        st.info(
+            "📌 **Insight thú vị:** KCN Tân Bình và ĐHQG Linh Trung là 2 trạm duy nhất trong mạng có PM2.5 trung vị ban đêm cao hơn ban ngày (chênh lệch lần lượt 0.6 và 1.2 µg/m³). Do chênh lệch nhỏ, cần thận trọng khi diễn giải. 4 trạm còn lại đều có nồng độ cao hơn ban ngày, nhất quán với nguồn phát thải giao thông tập trung vào giờ cao điểm."
+        )
+    elif night_higher_stations:
         st.info(
             f"📌 **Insight thú vị:** Dữ liệu cho thấy trạm {', '.join(night_higher_stations)} có **nồng độ {focus_pollutant} trung vị ban đêm (18h-6h) CAO HƠN ban ngày (6h-18h)**."
         )
@@ -547,7 +591,7 @@ st.markdown("---")
 st.caption("Dữ liệu đã được xử lý missing theo time interpolation theo từng trạm; giữ outlier; hiệu chỉnh bất nhất PM2.5 > TSP theo tỷ lệ PM2.5/TSP tham chiếu.")
 
 def render_conclusion():
-    st.markdown("### 💡 Kết luận: Bài toán Quy hoạch & Quản lý Không gian")
+    st.markdown("### 💡 Kết luận: Không gian ô nhiễm có sự phân hóa rõ rệt nhưng không theo chiều hướng thông thường")
     st.markdown(
         """
         <div style="
@@ -562,17 +606,17 @@ def render_conclusion():
             margin-top: 1rem;
         ">
             <h4 style="margin-top:0; color:#0F172A;">
-                🏙️ Không gian ô nhiễm có tính phân mảnh cao — Đòi hỏi giải pháp cục bộ
+                🏙️ Hàm ý quy hoạch và quản lý không gian
             </h4>
             <ul style="margin-bottom: 0;">
                 <li>
-                    <b>PM2.5 và Nguồn phát thải</b>: Dữ liệu thực tế cho thấy khu <i>Dân cư (Thanh Đa)</i> lại là điểm nóng về PM2.5 cao nhất toàn mạng, vượt qua cả các khu Giao thông hay Công nghiệp. Điều này cho thấy rủi ro phơi nhiễm bụi mịn cực kỳ nghiêm trọng ngay tại nơi sinh sống.
+                    <b>PM2.5 và TSP</b>: Khu Dân cư (Thanh Đa) — không phải Giao thông hay Công nghiệp — dẫn đầu về nồng độ bụi mịn toàn mạng, với median PM2.5 = 24.3 µg/m³. Trong khi đó, Trạm Giao thông ở Quận 3 lại là trạm duy nhất không vượt WHO PM2.5 quá bán thời gian.
                 </li>
                 <li>
-                    <b>Nghịch lý O3 và NO2</b>: Trạm <i>Giao thông (Bình Tân)</i> ghi nhận nồng độ O3 cao nhất, trong khi <i>Nền đô thị (Linh Trung)</i> có NO2 cao nhất. Tương quan NO2 - O3 tại TP.HCM là thuận chiều (positive correlation), phản ánh sự tích lũy và chuyển hóa quang hóa đồng thời dưới tác động của bức xạ mặt trời vào ban ngày.
+                    <b>Nghịch lý O3</b>: Phân bố không gian ngược chiều với PM2.5. Bình Tân (Giao thông) có O3 cao nhất, trong khi KCN Tân Bình có O3 thấp nhất. Điều này cho thấy hai nhóm chất ô nhiễm có nguồn gốc và cơ chế sinh ra khác nhau theo không gian.
                 </li>
                 <li>
-                    <b>Hệ quả cho chính sách</b>: Các biện pháp kiểm soát cần thiết kế <i>chuyên biệt cho từng cụm không gian</i> (Zoning). Không thể áp chuẩn chung khi mà khu Dân cư đối mặt với PM2.5, còn khu Giao thông lại vật lộn với bức xạ O3.
+                    <b>Hệ quả cho chính sách</b>: Nếu PM2.5 là ưu tiên can thiệp, Thanh Đa cần được xem xét trước tiên. Nếu O3 là ưu tiên, trọng tâm là Bình Tân và Linh Trung. Không có một chiến lược đồng nhất nào phù hợp với cả sáu trạm đồng thời — điều này được xác nhận bởi dữ liệu. <i>(Lưu ý: Dữ liệu NO2/SO2 toàn mạng và tại Quận 3 bị loại trừ do lỗi thiết bị đo nghiêm trọng)</i>.
                 </li>
             </ul>
         </div>

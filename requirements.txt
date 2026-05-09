@@ -1,0 +1,10 @@
+
+fastapi
+uvicorn
+groq
+python-dotenv
+
+statsmodels
+seaborn
+scikit-learn
+matplotlib
