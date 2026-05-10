@@ -537,7 +537,7 @@ def main():
         dominant_insight = (
             "<b>Phân hóa theo khu vực (Facet Bar):</b> Hồ sơ ô nhiễm phân hóa rõ theo đặc trưng khu vực: "
             "PM2.5 là chất chiếm tỷ trọng cao nhất tại khu Dân cư (162% WHO) và Công nghiệp (137% WHO). "
-            "O3 chiếm ưu thế tại khu Giao thông (137%) và Nền đô thị (133%).
+            "O3 chiếm ưu thế tại khu Giao thông (137%) và Nền đô thị (133%)."
             "Không có khu vực nào có hồ sơ an toàn toàn diện."
         )
 
