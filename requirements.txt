@@ -3,7 +3,11 @@ fastapi
 uvicorn
 groq
 python-dotenv
-
+streamlit
+pandas
+numpy
+plotly
+scipy
 statsmodels
 seaborn
 scikit-learn
