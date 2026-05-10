@@ -55,19 +55,20 @@ app.mount("/charts", StaticFiles(directory=TEMP_DIR), name="charts")
 # Gemini client
 # ─────────────────────────────────────────────────────────────
 
-# FIX 1 (critical): "gemini-3.1-flash-lite" does not exist.
-# Use a real model name.  Change here if you want a different model.
-MODEL_NAME = "gemini-3.1-flash-lite"
+# Model name — đổi tại đây nếu muốn dùng model khác.
+# gemini-1.5-flash: free tier quota cao hơn gemini-2.0-flash-lite
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
 
 api_key = os.environ.get("GOOGLE_API_KEY", "")
-genai.configure(api_key=api_key)
+if api_key:
+    genai.configure(api_key=api_key)
 
 gemini_model = genai.GenerativeModel(
     model_name=MODEL_NAME,
     generation_config={
         "response_mime_type": "application/json",
     },
-)
+) if api_key else None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -326,6 +327,11 @@ async def chat_with_ai(req: ChatRequest):
         raise HTTPException(
             status_code=500,
             detail="GOOGLE_API_KEY not configured. Vui lòng thêm key vào file .env"
+        )
+    if gemini_model is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Gemini model chưa được khởi tạo. Kiểm tra GOOGLE_API_KEY trong .env"
         )
 
     try:

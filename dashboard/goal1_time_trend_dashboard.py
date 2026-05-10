@@ -22,6 +22,7 @@ from dashboard.ui_theme import (
     inject_global_css, render_page_header, render_sidebar_header, render_section_header,
     render_divider, render_standard_sidebar, render_insight_box
 )
+from dashboard.components.goal1_conclusion import GoalOneConclusion
 
 _insight_box = render_insight_box
 
@@ -34,8 +35,16 @@ FLAG_COLS = [
     "NO2_flag", "SO2_flag", "Temperature_flag", "Humidity_flag",
 ]
 
-# WHO 24-hour PM2.5 guideline (µg/m³)
-WHO_PM25 = 15.0
+# ============= GLOBAL THRESHOLDS (WHO & QCVN) =============
+# WHO: PM2.5, CO, O3, SO2, NO2. QCVN: TSP.
+THRESHOLDS = {
+    "PM2.5": 15.0, 
+    "TSP": 150.0, 
+    "CO": 4000.0, 
+    "O3": 100.0, 
+    "SO2": 40.0, 
+    "NO2": 25.0
+}
 
 # Plotly color sequence — one distinct color per station
 STATION_COLORS = px.colors.qualitative.Bold
@@ -109,15 +118,15 @@ def render_kpis(df: pd.DataFrame) -> None:
     daily_mean_pm25 = (
         df.groupby(df["Datetime"].dt.date)["PM2.5"].mean()
     )
-    pct_above_who = (daily_mean_pm25 > WHO_PM25).mean() * 100
+    pct_above_who = (daily_mean_pm25 > THRESHOLDS["PM2.5"]).mean() * 100
 
     c1, c2, c3, c4 = st.columns(4)
 
     c1.metric(
         label="PM2.5 trung bình",
         value=f"{avg_pm25:.1f} µg/m³",
-        delta=f"+{avg_pm25:.1f} (Hiện tại)", # Dùng + để hiện màu xanh theo yêu cầu
-        delta_color="normal",
+        delta=f"{avg_pm25 - THRESHOLDS['PM2.5']:+.1f} so với WHO ({THRESHOLDS['PM2.5']})",
+        delta_color="inverse",   # red when above guideline
     )
     c2.metric(
         label="Nhiệt độ trung bình",
@@ -130,8 +139,8 @@ def render_kpis(df: pd.DataFrame) -> None:
     c4.metric(
         label="% ngày vượt WHO",
         value=f"{pct_above_who:.1f} %",
-        delta=f"Ngưỡng > {WHO_PM25} µg/m³",
-        delta_color="off", # Chữ khác màu xám
+        delta=f"Trung bình 24h > {THRESHOLDS['PM2.5']} µg/m³",
+        delta_color="off",
     )
 
 
@@ -164,13 +173,13 @@ def _insight_chart1(df: pd.DataFrame) -> None:
     else:
         lines.append(f"Mùa mưa: <b>{rain:.1f} µg/m³</b> (không có dữ liệu mùa khô trong khoảng này)")
 
-    # Dòng 2: % ngày rolling mean > 15
+    # Dòng 2: % ngày rolling mean > threshold
     daily = (
         tmp.groupby("Date")["PM2.5"].mean()
         .rolling(7, min_periods=1, center=True).mean()
     )
-    pct_exceed = (daily > 15).mean() * 100
-    lines.append(f"<b>{pct_exceed:.1f}%</b> số ngày có rolling mean PM2.5 vượt ngưỡng WHO 15 µg/m³")
+    pct_exceed = (daily > THRESHOLDS["PM2.5"]).mean() * 100
+    lines.append(f"<b>{pct_exceed:.1f}%</b> số ngày có rolling mean PM2.5 vượt ngưỡng WHO {THRESHOLDS['PM2.5']} µg/m³")
 
     # Dòng 3: spike bất thường (rolling mean > 60)
     daily_df = daily.reset_index()
@@ -310,10 +319,10 @@ def _insight_chart5(df: pd.DataFrame) -> None:
     # Dòng 1: giờ PM2.5 cao nhất
     pm25_peak_h = int(hourly["PM2.5"].idxmax())
     pm25_peak_v = hourly["PM2.5"].max()
-    who_cmp = "trên" if pm25_peak_v > 15 else "dưới"
+    who_cmp = "trên" if pm25_peak_v > THRESHOLDS["PM2.5"] else "dưới"
     line1 = (
         f"PM2.5 cao nhất lúc <b>{pm25_peak_h}:00</b> — "
-        f"<b>{pm25_peak_v:.1f} µg/m³</b> ({who_cmp} ngưỡng WHO 15 µg/m³)"
+        f"<b>{pm25_peak_v:.1f} µg/m³</b> ({who_cmp} ngưỡng WHO {THRESHOLDS['PM2.5']} µg/m³)"
     )
 
     # Dòng 2: giờ CO cao nhất
@@ -394,11 +403,11 @@ def render_chart1_pm25_trend(df: pd.DataFrame) -> None:
 
     # ── WHO guideline
     fig.add_hline(
-        y=WHO_PM25,
+        y=THRESHOLDS["PM2.5"],
         line_dash="dash",
         line_color="red",
         line_width=1.8,
-        annotation_text="Ngưỡng WHO: 15 µg/m³",
+        annotation_text=f"Ngưỡng WHO: {THRESHOLDS['PM2.5']} µg/m³",
         annotation_position="top left",
         annotation_font=dict(color="red", size=12),
     )
@@ -643,11 +652,11 @@ def _build_density_fig(
 
     # ── WHO guideline
     fig.add_hline(
-        y=WHO_PM25,
+        y=THRESHOLDS["PM2.5"],
         line_dash="dash",
         line_color="red",
         line_width=1.8,
-        annotation_text="Ngưỡng WHO: 15 µg/m³",
+        annotation_text=f"Ngưỡng WHO: {THRESHOLDS['PM2.5']} µg/m³",
         annotation_position="top left",
         annotation_font=dict(color="red", size=12),
     )
@@ -1117,16 +1126,36 @@ def render_chart5_hourly_drilldown(df: pd.DataFrame, start_date, end_date) -> No
             ),
             secondary_y=True,
         )
-        # Đường WHO chỉ cho PM2.5 (trục trái)
+        # Đường WHO cho các chất
         fig.add_hline(
-            y=WHO_PM25,
+            y=THRESHOLDS["PM2.5"],
             line_dash="dash",
             line_color="red",
             line_width=1.8,
-            annotation_text=f"WHO PM2.5: {WHO_PM25} µg/m³",
+            annotation_text=f"WHO PM2.5: {THRESHOLDS['PM2.5']} µg/m³",
             annotation_position="bottom right",
             annotation_font=dict(color="red", size=11),
             secondary_y=False,
+        )
+        fig.add_hline(
+            y=THRESHOLDS["CO"],
+            line_dash="dash",
+            line_color="green",
+            line_width=1.8,
+            annotation_text=f"WHO CO: {THRESHOLDS['CO']} µg/m³",
+            annotation_position="top right",
+            annotation_font=dict(color="green", size=11),
+            secondary_y=True,
+        )
+        fig.add_hline(
+            y=THRESHOLDS["NO2"],
+            line_dash="dash",
+            line_color="orange",
+            line_width=1.8,
+            annotation_text=f"WHO NO2: {THRESHOLDS['NO2']} µg/m³",
+            annotation_position="bottom right",
+            annotation_font=dict(color="orange", size=11),
+            secondary_y=True,
         )
 
     # ── Annotation peak bất thường — giữ cả 2 chế độ
@@ -1315,9 +1344,27 @@ def main() -> None:
 
     st.divider()
 
+    if n_days > 7:
+        GoalOneConclusion.render(
+            station_df=filtered_station,
+            time_df=filtered_time,
+            start_date=start_date,
+            end_date=end_date,
+            n_days=n_days,
+        )
+        return
+
     # ── Chart 5 — Fix 2: chỉ hiển thị khi date range ≤ 7 ngày
     if n_days <= 7:
         render_chart5_hourly_drilldown(filtered_time, start_date, end_date)
+        st.divider()
+        GoalOneConclusion.render(
+            station_df=filtered_station,
+            time_df=filtered_time,
+            start_date=start_date,
+            end_date=end_date,
+            n_days=n_days,
+        )
     else:
         render_insight_box([
             "Chọn khoảng thời gian <b>≤ 7 ngày</b> để xem phân tích chi tiết theo từng giờ."

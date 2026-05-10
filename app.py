@@ -2,6 +2,12 @@
 HCMC Air Quality Dashboard — Entry Point
 Sử dụng st.navigation để tạo giao diện đa trang hiện đại.
 """
+import sys
+from pathlib import Path
+
+# Thêm project root vào sys.path để enable absolute imports
+sys.path.insert(0, str(Path(__file__).parent))
+
 import streamlit as st
 
 # Cấu hình trang chung
