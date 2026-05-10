@@ -7,6 +7,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from dashboard.ui_theme import (
+    inject_global_css, render_page_header, render_sidebar_header,
+    render_section_header, render_divider, render_standard_sidebar,
+    render_insight_box
+)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # HẰNG SỐ
 # ─────────────────────────────────────────────────────────────────────────────
@@ -317,49 +323,19 @@ def reset_filters(default_stations, default_start, default_end):
 def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     """Render toàn bộ trang Mục tiêu 5 — Phân tích Rủi ro Sức khỏe do bụi mịn PM2.5."""
 
-    # ── CSS tùy chỉnh ──
+    inject_global_css()
+
+    render_page_header(
+        "Phân tích rủi ro sức khỏe do bụi mịn PM2.5",
+        'Tiêu chí: Ngày "Nguy hại" khi PM2.5 trung bình > 15 µg/m³ (ngưỡng WHO)'
+    )
+
+    # ── CSS bổ sung riêng Goal 5 (section-divider) ──
     st.markdown(f"""
     <style>
-        .stApp {{ background-color: {CANVAS_BG}; }}
-        section[data-testid="stSidebar"] {{
-            background-color: {CARD_BG};
-            border-right: 1px solid {GRIDLINE};
-        }}
-        div[data-testid="stMetric"] {{
-            background: {CARD_BG};
-            border: 1px solid {GRIDLINE};
-            border-radius: 12px;
-            padding: 16px 20px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        }}
-        div[data-testid="stMetric"] label {{
-            color: {TEXT_SECONDARY};
-            font-size: 13px;
-        }}
-        div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
-            font-size: 28px;
-            font-weight: 700;
-            color: {TEXT_PRIMARY};
-        }}
-        .section-divider {{
-            border: none;
-            border-top: 1px solid {GRIDLINE};
-            margin: 24px 0 18px 0;
-        }}
+    .section-divider {{ border:none; border-top:1px solid {GRIDLINE}; margin:24px 0 18px 0; }}
     </style>
     """, unsafe_allow_html=True)
-
-    # ── Tiêu đề trang ──
-    st.markdown(
-        f"<h1 style='color:{TEXT_PRIMARY};font-family:Segoe UI,Arial;margin-bottom:2px;'>"
-        "Mục tiêu 5: Phân tích Rủi ro Sức khỏe do bụi mịn PM2.5</h1>",
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Tiêu chí đánh giá: Một ngày được xếp loại \"Nguy hại\" nếu nồng độ PM2.5 "
-        "trung bình trong ngày đó lớn hơn 15 µg/m³ (ngưỡng khuyến cáo của WHO), "
-        "ngược lại được xếp loại \"An toàn\"."
-    )
 
     # ── Tải dữ liệu ──
     data_path = file_path or str(DEFAULT_DATA_PATH)
@@ -377,35 +353,26 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     # ─────────────────────────────────────────────────────────────────────────
     # SIDEBAR — Bộ lọc dữ liệu
     # ─────────────────────────────────────────────────────────────────────────
-    with st.sidebar:
-        st.markdown("### Bộ lọc dữ liệu")
-
-        all_stations = sorted(df_all["Station_No"].unique().tolist())
-        sel_stations: list = st.multiselect(
-            "Chọn trạm quan trắc", options=all_stations, default=all_stations,
-            format_func=lambda x: f"Trạm {x}", key="P06_station",
+    def _g5_extra():
+        st.sidebar.button(
+            "Đặt lại bộ lọc",
+            on_click=reset_filters,
+            args=(sorted(df_all["Station_No"].unique().tolist()),
+                  df_all["datetime"].dt.date.min(),
+                  df_all["datetime"].dt.date.max()),
         )
+        return {}
 
-        min_d = df_all["datetime"].dt.date.min()
-        max_d = df_all["datetime"].dt.date.max()
-        sel_range = st.date_input(
-            "Khoảng thời gian", value=(min_d, max_d),
-            min_value=min_d, max_value=max_d, key="P06_date",
-        )
-
-        st.button("Đặt lại bộ lọc", on_click=reset_filters, args=(all_stations, min_d, max_d))
-
-    # ── Kiểm tra bộ lọc ──
-    if isinstance(sel_range, (list, tuple)):
-        if len(sel_range) == 2:
-            d_start, d_end = sel_range
-        elif len(sel_range) == 1:
-            st.info("Vui lòng chọn ngày kết thúc trong bộ lọc khoảng thời gian để xem dữ liệu.")
-            return
-        else:
-            d_start, d_end = min_d, max_d
-    else:
-        d_start, d_end = sel_range, sel_range
+    sb = render_standard_sidebar(
+        df_all,
+        datetime_col="datetime",
+        station_col="Station_No",
+        sidebar_key_prefix="g5",
+        extra_widgets_fn=_g5_extra,
+    )
+    sel_stations = sb["stations"]
+    d_start      = sb["start_date"]
+    d_end        = sb["end_date"]
 
     if not sel_stations:
         st.warning("Vui lòng chọn ít nhất một trạm.")
@@ -468,29 +435,30 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     k1.metric(
         "Trung bình nồng độ PM2.5", 
         f"{avg_pm25:.2f} µg/m³",
-        help="Nồng độ bụi mịn PM2.5 trung bình trong suốt khoảng thời gian và các trạm đã chọn"
+        delta="Chỉ số chính",
+        delta_color="off"
     )
     
     k2.metric(
         "Tổng số ngày quan trắc", 
         f"{total_days:,}",
-        help="Tổng số ngày có dữ liệu hợp lệ (tính theo lịch) trong khoảng thời gian đã lọc"
+        delta="Toàn kỳ",
+        delta_color="off"
     )
     
     k3.metric(
         "Số ngày nguy hại", 
         f"{haz_days:,}",
-        delta=f"{haz_pct:.1f}% trên tổng số ngày", 
+        delta=f"-{haz_pct:.1f}% trên tổng số ngày", # Dấu - để hiện màu đỏ
         delta_color="inverse",
-        help="Số ngày có nồng độ PM2.5 trung bình vượt ngưỡng 15 µg/m³ của WHO"
     )
 
-    st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
+    render_divider()
 
     # ─────────────────────────────────────────────────────────────────────────
     # HÀNG 1 — Biểu đồ Donut + Bar theo trạm
     # ─────────────────────────────────────────────────────────────────────────
-    st.subheader("Tổng quan rủi ro và phân bố theo khu vực")
+    render_section_header("Tổng quan rủi ro và phân bố theo khu vực")
     col_donut, col_bar = st.columns(2)
 
     with col_donut:
@@ -498,17 +466,14 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
         # Nhận xét động cho biểu đồ Donut
         safe_pct = 100 - haz_pct
         if haz_pct > 0:
-            st.info(
-                f"Trong khoảng thời gian chọn, có {haz_pct:.1f}% số ngày "
-                f"({haz_days}/{total_days} ngày) người dân phải tiếp xúc với "
-                f"không khí nguy hại (PM2.5 trung bình vượt 15 µg/m³). "
-                f"Chỉ có {safe_pct:.1f}% số ngày đạt mức an toàn theo khuyến cáo WHO."
-            )
+            render_insight_box([
+                f"Có <b>{haz_pct:.1f}%</b> số ngày ({haz_days}/{total_days} ngày) tiếp xúc với không khí nguy hại (PM2.5 > 15 µg/m³).",
+                f"Chỉ có <b>{safe_pct:.1f}%</b> số ngày đạt mức an toàn theo khuyến cáo WHO."
+            ], title="Cân bằng rủi ro", icon_name="activity")
         else:
-            st.info(
-                f"Trong khoảng thời gian chọn, 100% số ngày ({total_days} ngày) "
-                f"đều đạt mức an toàn theo khuyến cáo WHO."
-            )
+            render_insight_box([
+                f"100% số ngày ({total_days} ngày) đều đạt mức an toàn theo khuyến cáo WHO."
+            ], title="✅ Mức độ an toàn tuyệt đối")
 
     with col_bar:
         st.plotly_chart(Station_Risk_Bar(df_station_daily), use_container_width=True)
@@ -521,17 +486,17 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
             )
             worst_stn, worst_val = stn_haz.idxmax(), stn_haz.max()
             best_stn, best_val = stn_haz.idxmin(), stn_haz.min()
-            st.info(
-                f"Trạm có tỷ lệ ngày nguy hại cao nhất: Trạm {worst_stn} ({worst_val:.1f}%). "
-                f"Trạm có tỷ lệ ngày nguy hại thấp nhất: Trạm {best_stn} ({best_val:.1f}%)."
-            )
+            render_insight_box([
+                f"Trạm có tỷ lệ ngày nguy hại cao nhất: <b>Trạm {worst_stn}</b> ({worst_val:.1f}%).",
+                f"Trạm có tỷ lệ ngày nguy hại thấp nhất: <b>Trạm {best_stn}</b> ({best_val:.1f}%)."
+            ], title="Phân hóa theo trạm", icon_name="location")
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────────────────────────────────
     # HÀNG 2 — Biểu đồ đường cường độ rủi ro PM2.5
     # ─────────────────────────────────────────────────────────────────────────
-    st.subheader("Diễn biến cường độ rủi ro PM2.5 theo ngày")
+    render_section_header("Diễn biến cường độ rủi ro PM2.5 theo ngày")
     st.plotly_chart(Daily_PM25_Trend(df_city_daily), use_container_width=True)
 
     # Nhận xét động cho biểu đồ Trend
@@ -559,7 +524,7 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     # ─────────────────────────────────────────────────────────────────────────
     # HÀNG 3 — Heatmap chu kỳ thời gian
     # ─────────────────────────────────────────────────────────────────────────
-    st.subheader("Mức độ rủi ro theo Chu kỳ thời gian")
+    render_section_header("Mức độ rủi ro theo Chu kỳ thời gian")
     st.caption(
         "Lưu ý: Ngưỡng 15 µg/m³ là chuẩn trung bình 24 giờ của WHO, "
         "tại đây được dùng như ngưỡng tham chiếu để so sánh theo từng giờ."

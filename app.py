@@ -1,13 +1,10 @@
 """
-HCMC Air Quality Dashboard — Home Page
-Streamlit multipage app: các goal nằm trong thư mục pages/
-Chạy: streamlit run app.py
+HCMC Air Quality Dashboard — Entry Point
+Sử dụng st.navigation để tạo giao diện đa trang hiện đại.
 """
 import streamlit as st
-import streamlit.components.v1 as components
-import requests
-import json
 
+# Cấu hình trang chung
 st.set_page_config(
     page_title="HCMC Air Quality Dashboard",
     page_icon="🌫️",
@@ -15,144 +12,73 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("🌫️ HCMC Air Quality Dashboard")
+# Định nghĩa các trang dựa trên file trong thư mục dashboard/
+pg0 = st.Page("dashboard/overview.py", title="Tổng Quan", icon=":material/home:", default=True)
+pg1 = st.Page("dashboard/goal1_time_trend_dashboard.py", title="Xu Hướng Thời Gian", icon=":material/trending_up:")
+pg2 = st.Page("dashboard/goal2_station_comparison_dashboard.py", title="Phân Bố Khu Vực", icon=":material/location_on:")
+pg3 = st.Page("dashboard/goal3_weather_impact_analysis.py", title="Ảnh Hưởng Thời Tiết", icon=":material/wb_sunny:")
+pg4 = st.Page("dashboard/goal4_pollutant_correlation_analysis.py", title="Tương Quan Các Chất", icon=":material/analytics:")
+pg5 = st.Page("dashboard/goal5_health_risk_profiling.py", title="Rủi Ro Sức Khỏe", icon=":material/health_and_safety:")
 
-tab1, tab2 = st.tabs(["🏠 Dashboard Home", "🤖 AI Assistant"])
+# Sử dụng danh sách phẳng để không hiển thị tiêu đề nhóm
+pg = st.navigation([pg0, pg1, pg2, pg3, pg4, pg5])
 
-with tab1:
-    st.markdown(
-        """
-        Dashboard phân tích chất lượng không khí **TP. Hồ Chí Minh**  
-        dựa trên dữ liệu từ **6 trạm quan trắc**, giai đoạn **2021–2022**.
-
-        ---
-        | Goal | Nội dung |
-        |------|----------|
-        | **Goal 1** | Xu hướng PM2.5 theo thời gian, heatmap giờ × tháng, drill-down 24h |
-        | **Goal 2** | Phân bổ không gian ô nhiễm, so sánh trạm và đặc trưng khu vực |
-        | **Goal 3** | Tác động của nhiệt độ & độ ẩm đến nồng độ ô nhiễm |
-        | **Goal 4** | Tương quan nội bộ giữa CO, NO2, SO2, PM2.5 |
-        | **Goal 5** | Phân tích rủi ro sức khỏe theo ngưỡng WHO |
-
-        👈 Chọn mục phân tích ở thanh bên trái để bắt đầu.
-        """
-    )
-
-with tab2:
-    st.header("🤖 Trợ lý Phân tích AI (Data Analyst)")
-    st.write("Nhập yêu cầu phân tích dữ liệu, AI sẽ viết code Python và bạn có thể duyệt/chạy ngay trên máy.")
+# ── Styling Sidebar Navigation ──
+st.markdown(
+    """
+    <style>
+    /* Mục lục điều hướng chung */
+    [data-testid="stSidebarNav"] ul {
+        padding-top: 10px;
+    }
     
-    col1, col2 = st.columns([1, 1])
+    /* Font chữ lớn cho tất cả các mục */
+    [data-testid="stSidebarNav"] li a {
+        font-size: 16px !important;
+        font-weight: 500 !important;
+        color: #16324F !important;
+        padding: 8px 16px !important;
+        border-radius: 8px !important;
+        margin-bottom: 4px !important;
+    }
+
+    /* Riêng chữ "Tổng quan" trong sidebar */
+    [data-testid="stSidebarNav"] li:first-child {
+        border-bottom: 1px solid #E5EEF3 !important;
+        margin-bottom: 12px !important;
+        padding-bottom: 12px !important;
+    }
     
-    with col1:
-        st.subheader("💬 Trò chuyện")
-        
-        # Đóng gói toàn bộ lịch sử thành 1 vùng cuộn độc lập
-        chat_container = st.container(height=650, border=True)
-        with chat_container:
-            if "chat_messages" not in st.session_state:
-                st.session_state.chat_messages = []
-                
-            # Hiển thị lịch sử chat
-            for msg in st.session_state.chat_messages:
-                with st.chat_message(msg["role"]):
-                    if msg.get("type") == "chart":
-                        url = msg["url"]
-                        st.caption("📈 Biểu đồ được tạo từ mã nguồn:")
-                        if url.endswith(".html"):
-                            components.iframe(url, height=500, scrolling=True)
-                        else:
-                            st.image(url, use_container_width=True)
-                    else:
-                        st.write(msg["content"])
-                
-        # Khung nhập liệu ở dưới cùng cột
-        if prompt := st.chat_input("Hỏi AI về cách vẽ biểu đồ hoặc phân tích dữ liệu..."):
-            st.session_state.chat_messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.write(prompt)
-                
-            with st.chat_message("assistant"):
-                with st.spinner("AI đang phân tích..."):
-                    try:
-                        res = requests.post("http://localhost:8000/api/chat", json={
-                            "prompt": prompt,
-                            "context": "Dữ liệu gồm PM2.5, NO2, SO2, CO, O3, TSP từ 2021-2022 tại 6 trạm TP.HCM.",
-                            "history": st.session_state.chat_messages[:-1] # Gửi kèm lịch sử (trừ tin nhắn vừa nhập)
-                        })
-                        if res.status_code == 200:
-                            data = res.json()
-                            chat_id = data.get("chat_id")
-                            explanation = data.get("explanation", "Không có giải thích.")
-                            st.write(explanation)
-                            st.session_state.chat_messages.append({"role": "assistant", "content": explanation})
-                            
-                            # Lưu chat_id và code vào session_state
-                            code_generated = data.get("code", "")
-                            if code_generated:
-                                st.session_state.current_code = code_generated
-                                st.session_state.current_chat_id = chat_id
-                                st.rerun() 
-                        else:
-                            st.error(f"Lỗi API: {res.text}")
-                    except Exception as e:
-                        st.error("Không thể kết nối Backend FastAPI. Đảm bảo bạn đã chạy: `uvicorn backend.main:app --port 8000`")
-    
-    with col2:
-        st.subheader("💻 Mã nguồn & Thực thi")
-        
-        # Đóng gói Code editor & Output thành 1 vùng cuộn độc lập
-        code_container = st.container(height=650, border=True)
-        with code_container:
-            st.info("💡 Tuỳ chỉnh mã nguồn Python tại đây trước khi thực thi.")
-            
-            # Lấy code hiện tại từ session state
-            code_val = st.session_state.get("current_code", "# Code Python do AI sinh ra sẽ xuất hiện ở đây\n")
-            
-            # Ô text area cho phép sửa code
-            code_input = st.text_area("Python Editor", value=code_val, height=450)
-            
-            # Nút chạy code với style Premium
-            if st.button("🚀 Phê duyệt & Chạy Code (Execute)", type="primary", use_container_width=True):
-                if code_input.strip() and code_input != "# Code Python do AI sinh ra sẽ xuất hiện ở đây\n":
-                    chat_id = st.session_state.get("current_chat_id")
-                    if not chat_id:
-                        st.error("⚠️ Không tìm thấy chat_id. Vui lòng chat với AI để sinh code trước.")
-                    else:
-                        with st.spinner("Đang chạy mã Python..."):
-                            try:
-                                exec_res = requests.post(
-                                    "http://localhost:8000/api/execute", 
-                                    json={"code": code_input, "chat_id": chat_id},
-                                    timeout=25
-                                )
-                                if exec_res.status_code == 200:
-                                    result = exec_res.json()
-                                    if result.get("success"):
-                                        st.success("Chạy thành công!")
-                                        # Hiển thị Stdout
-                                        if result.get("stdout"):
-                                            st.text("Kết quả (Stdout):")
-                                            st.code(result["stdout"])
-                                        
-                                        # Nếu AI vẽ biểu đồ, đẩy biểu đồ vào khung chat
-                                        if result.get("chart_url"):
-                                            full_url = "http://localhost:8000" + result.get("chart_url")
-                                            # Thêm vào chat_messages để lưu lịch sử
-                                            st.session_state.chat_messages.append({
-                                                "role": "assistant", 
-                                                "type": "chart", 
-                                                "url": full_url
-                                            })
-                                            st.rerun() # Refresh để bên trái hiện biểu đồ
-                                    else:
-                                        st.error("Có lỗi trong quá trình chạy!")
-                                        if result.get("stderr"):
-                                            st.text("Lỗi (Stderr):")
-                                            st.code(result["stderr"])
-                                else:
-                                    st.error(f"Lỗi Execute API (Status {exec_res.status_code}): {exec_res.text}")
-                            except Exception as e:
-                                st.error(f"Không thể kết nối Backend Execute API: {str(e)}")
-            else:
-                st.warning("Vui lòng nhập code trước khi chạy.")
+    [data-testid="stSidebarNav"] li:first-child a span {
+        font-size: 24px !important;
+        font-weight: 700 !important;
+    }
+
+    /* Phần được chọn: background xanh đậm, chữ trắng */
+    [data-testid="stSidebarNav"] li a[aria-current="page"] {
+        background-color: #16324F !important;
+        color: #ffffff !important;
+    }
+    [data-testid="stSidebarNav"] li a[aria-current="page"] span {
+        color: #ffffff !important;
+    }
+    [data-testid="stSidebarNav"] li a[aria-current="page"] svg {
+        fill: #ffffff !important;
+    }
+
+    /* Căn chỉnh icon */
+    [data-testid="stSidebarNavItems"] svg {
+        width: 20px !important;
+        height: 20px !important;
+        margin-right: 4px !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Chạy trang đã chọn
+pg.run()
+
+# Lưu ý: Phần AI Assistant cũ đã được lược bỏ để khớp với giao diện tối giản trong hình.
+# Nếu bạn muốn thêm lại AI Assistant như một trang riêng, có thể định nghĩa thêm st.Page cho nó.

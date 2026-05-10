@@ -10,6 +10,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
 
+from dashboard.ui_theme import (
+    inject_global_css, render_page_header, render_sidebar_header,
+    render_section_header, render_divider, render_conclusion_box,
+    render_standard_sidebar, render_insight_box, get_icon_html
+)
+
 # ──────────────────────────── CONFIG ────────────────────────────
 DATA_PATH = Path(__file__).parent.parent / "data" / "cleaned" / "Air_Quality_HCMC_Cleaned.csv"
 
@@ -73,32 +79,34 @@ def filter_reliable(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 # ──────────────────────────── SIDEBAR ───────────────────────────
 def render_sidebar(df):
-    st.sidebar.markdown("## 🔧 Bộ lọc dữ liệu")
-
-    stations = st.sidebar.multiselect(
-        "🏭 Trạm quan trắc", STATIONS, default=STATIONS,
-        format_func=lambda x: f"Trạm {x}",
+    result = render_standard_sidebar(
+        df,
+        datetime_col="Date",
+        station_col="Station_No",
+        sidebar_key_prefix="g3",
+        extra_widgets_fn=lambda: _sidebar_extra_g3(),
     )
-    mn, mx = df["Date"].min().date(), df["Date"].max().date()
-    date_range = st.sidebar.date_input("📅 Khoảng thời gian", value=(mn, mx), min_value=mn, max_value=mx)
+    return (
+        result["stations"],
+        (result["start_date"], result["end_date"]),
+        result.get("season", "Tất cả"),
+        result.get("hour_range", (0, 23)),
+        result.get("pollutant_focus", POLLUTANTS),
+    )
 
-    season = st.sidebar.radio("🌦️ Mùa", ["Tất cả", "Mùa khô", "Mùa mưa"], horizontal=True)
 
-    hour_range = st.sidebar.slider("🕐 Khung giờ", 0, 23, (0, 23))
-
+def _sidebar_extra_g3():
+    """Widget bổ sung riêng Goal 3."""
+    season = st.sidebar.radio("Mùa", ["Tất cả", "Mùa khô", "Mùa mưa"], horizontal=True)
+    hour_range = st.sidebar.slider("Khung giờ", 0, 23, (0, 23))
     pollutant_focus = st.sidebar.multiselect(
-        "🧪 Chất ô nhiễm hiển thị (Heatmap)", POLLUTANTS, default=POLLUTANTS,
+        "Chất ô nhiễm (Heatmap)", POLLUTANTS, default=POLLUTANTS,
     )
-
-    st.sidebar.markdown("---")
-    st.sidebar.caption("Dữ liệu: HealthyAir HCMC 02/2021 – 06/2022")
-
-    return stations, date_range, season, hour_range, pollutant_focus
+    return {"season": season, "hour_range": hour_range, "pollutant_focus": pollutant_focus}
 
 
 # ──────────────────── SECTION 1 — KPI ──────────────────────────
 def render_section1(df):
-    st.markdown("### 📊 Tổng quan Khí tượng & Ô nhiễm")
 
     # Lọc dữ liệu đáng tin cậy cho từng metric KPI
     df_temp = filter_reliable(df, ["Temperature"])
@@ -122,16 +130,15 @@ def render_section1(df):
                     best_r, best_label = r, f"{w[:4]}×{p}"
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🌡️ Nhiệt độ TB", f"{df_temp['Temperature'].mean():.1f} °C")
-    c2.metric("💧 Độ ẩm TB", f"{df_humid['Humidity'].mean():.1f} %")
-    c3.metric("🏜️ PM2.5 Khô vs Mưa", f"{pm_dry:.1f} / {pm_wet:.1f}", f"{delta_pm:+.1f}%")
-    c4.metric("🔗 Tương quan mạnh nhất", best_label, f"r = {best_r:+.3f}")
+    c1.metric("Nhiệt độ trung bình", f"{df_temp['Temperature'].mean():.1f} °C")
+    c2.metric("Độ ẩm trung bình", f"{df_humid['Humidity'].mean():.1f} %")
+    c3.metric("PM2.5 Khô vs Mưa", f"{pm_dry:.1f} / {pm_wet:.1f}", f"+{delta_pm:.1f}% chênh lệch", delta_color="normal")
+    c4.metric("Tương quan mạnh nhất", best_label, f"r = {best_r:+.3f}", delta_color="off")
 
 
 # ──────────────────── SECTION 2 — HEATMAP ──────────────────────
 def render_section2(df, pollutant_focus):
-    st.markdown("### 🔥 Ma trận Tương quan: Thời tiết × Ô nhiễm")
-    st.caption("Mức độ tương quan tuyến tính giữa Nhiệt độ & Độ ẩm với 6 chất ô nhiễm · Ô viền vàng: tương quan đáng kể (|r| ≥ 0.15)")
+    render_section_header("Ma trận Tương quan: Thời tiết × Ô nhiễm", "Mức độ tương quan tuyến tính giữa Nhiệt độ & Độ ẩm với 6 chất ô nhiễm · Ô viền vàng: tương quan đáng kể (|r| ≥ 0.15)")
 
     cols_show = [p for p in POLLUTANTS if p in pollutant_focus]
     if not cols_show:
@@ -186,7 +193,7 @@ def render_section2(df, pollutant_focus):
             details.append(f"Nhiệt độ r={r_temp:+.3f}")
         if sig_humid:
             details.append(f"Độ ẩm r={r_humid:+.3f}")
-        entry = f"**{p}** ({', '.join(details)})"
+        entry = f"<b>{p}</b> ({', '.join(details)})"
 
         # Phân loại theo hướng tương quan trung bình của các cặp đáng kể
         sig_vals = [v for v, s in [(r_temp, sig_temp), (r_humid, sig_humid)] if s]
@@ -196,14 +203,14 @@ def render_section2(df, pollutant_focus):
             thuan.append(entry)
 
     if nghich or thuan:
-        parts = ["📌 **Thời tiết tác động có chọn lọc:**"]
+        parts = []
         if nghich:
-            parts.append(f"↘ Tương quan nghịch (thời tiết cao → ô nhiễm giảm): {' · '.join(nghich)}")
+            parts.append(f"↘ <b>Tương quan nghịch</b> (thời tiết cao → ô nhiễm giảm): {' · '.join(nghich)}")
         if thuan:
-            parts.append(f"↗ Tương quan thuận (thời tiết cao → ô nhiễm tăng): {' · '.join(thuan)}")
+            parts.append(f"↗ <b>Tương quan thuận</b> (thời tiết cao → ô nhiễm tăng): {' · '.join(thuan)}")
         if neutral:
-            parts.append(f"↔ Gần như không ảnh hưởng: {', '.join(neutral)}")
-        st.info("  \n".join(parts))
+            parts.append(f"↔ <b>Gần như không ảnh hưởng</b>: {', '.join(neutral)}")
+        render_insight_box(parts, title="Thời tiết tác động có chọn lọc", icon_name="weather")
 
 
 # ──────────────── SECTION 3 — DIURNAL CYCLES ───────────────────
@@ -276,7 +283,7 @@ def _diurnal_chart_3lines(hourly, w1, w2, poll, title, caption_text):
 
 
 def render_section3(df):
-    st.markdown("### 🕐 Chu kỳ Ngày: Giải mã Nghịch lý")
+    render_section_header("Chu kỳ ngày: giải mã nghịch lý")
     st.caption(
         "Mỗi biến được chuẩn hóa Min-Max (0–1) để so sánh xu hướng. "
         "**Di chuột** vào điểm để xem giá trị thật."
@@ -293,7 +300,7 @@ def render_section3(df):
     hourly_so2 = df_so2.groupby("Hour")[WEATHER + POLLUTANTS].mean()
 
     # ── Row 1: PM2.5 ──
-    st.markdown("#### 🔍 Nghịch lý PM2.5 & O3")
+    st.markdown(f"#### {get_icon_html('analysis')} Nghịch lý PM2.5 & O3", unsafe_allow_html=True)
     r1c1, r1c2 = st.columns(2)
     with r1c1:
         pm_peak_h = hourly_pm_o3["PM2.5"].idxmax()
@@ -323,7 +330,7 @@ def render_section3(df):
         st.caption(cap)
 
     # ── Row 2: NO2 & SO2 ──
-    st.markdown("#### 🔍 Bất ngờ NO2 & SO2")
+    st.markdown(f"#### {get_icon_html('search')} Bất ngờ NO2 & SO2", unsafe_allow_html=True)
     r2c1, r2c2 = st.columns(2)
     with r2c1:
         r_no2 = hourly_no2["Humidity"].corr(hourly_no2["NO2"])
@@ -391,8 +398,7 @@ def render_section3(df):
 
 # ──────────────── SECTION 4 — MONTHLY TREND ────────────────────
 def render_section4(df):
-    st.markdown("### 📅 Xu hướng Theo Tháng: PM2.5 & O3")
-    st.caption("Kiểm tra liệu ô nhiễm có biến động theo mùa không — và nhiệt độ đóng vai trò gì trong đó.")
+    render_section_header("Xu hướng theo tháng: PM2.5 & O3", "Kiểm tra liệu ô nhiễm có biến động theo mùa không — và nhiệt độ đóng vai trò gì trong đó.")
 
     # Lọc dữ liệu reliable cho từng biến trong monthly chart
     df_pm25 = filter_reliable(df, ["PM2.5", "Humidity"])
@@ -493,68 +499,52 @@ def render_section4(df):
 # ──────────────── CONCLUSION BOX ───────────────────────────────
 def render_conclusion():
     st.markdown("---")
-    st.markdown("### 💡 Kết luận")
-    st.markdown(
-        """
-        <div style="
-            background: linear-gradient(135deg, #EEF4F8 0%, #F4F8FB 100%);
-            border-left: 5px solid #1F8A70;
-            border-radius: 8px;
-            padding: 24px 28px;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            color: #16324F;
-            line-height: 1.8;
-        ">
-            <h4 style="margin-top:0; color:#1F8A70;">
-                🌤️ Thời tiết là điều kiện nền — Nguồn phát thải mới là nguyên nhân chính
-            </h4>
-            <ol style="margin-bottom: 0;">
-                <li>
-                    <b>Tương quan tổng thể rất yếu</b>: Không có cặp Thời tiết × Ô nhiễm nào
-                    vượt |r| = 0.35. Ở khí hậu nhiệt đới TP.HCM, nhiệt độ và độ ẩm dao động
-                    hẹp quanh năm nên không đủ tạo tín hiệu tương quan mạnh với ô nhiễm.
-                </li>
-                <li>
-                    <b>Chu kỳ ngày là yếu tố gây nhiễu</b>: PM2.5 peak sáng sớm (giờ cao điểm),
-                    O3 peak chiều (trễ quang hóa 3–5h so với Nhiệt độ peak), NO2 và SO2 tăng theo hoạt động
-                    giao thông và công nghiệp — tất cả trùng với chu kỳ nhiệt/ẩm nhưng nguyên nhân thực sự
-                    là <em>hoạt động giao thông và công nghiệp</em>, không phải thời tiết.
-                </li>
-                <li>
-                    <b>Mùa khô ô nhiễm hơn 34%</b> — nhưng nhiệt độ 2 mùa gần như bằng nhau.
-                    Với PM2.5: yếu tố quyết định là <em>thiếu mưa rửa trôi</em>
-                    và nghịch nhiệt giữ bụi lơ lửng. Với O3: mùa mưa nhiều mây che khuất
-                    ánh sáng mặt trời làm <em>phản ứng quang hóa suy yếu</em> — hai chất cùng pattern
-                    mùa nhưng cơ chế hoàn toàn khác nhau.
-                </li>
-                <li>
-                    <b>Hàm ý</b>: Chính sách giảm ô nhiễm tại TP.HCM cần tập trung vào
-                    <em>kiểm soát nguồn phát thải</em> (giao thông, công nghiệp) thay vì
-                    chờ đợi điều kiện thời tiết thuận lợi — vì thời tiết chỉ điều tiết
-                    mức độ tích tụ, không quyết định lượng phát thải.
-                </li>
-            </ol>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(f"### {get_icon_html('insight')} Kết luận", unsafe_allow_html=True)
+    
+    content_html = f"""
+        <h4 style="color:#1F8A70;">
+            {get_icon_html("analysis")} Thời tiết là điều kiện nền — nguồn phát thải mới là nguyên nhân chính
+        </h4>
+        <ol style="margin-bottom: 0;">
+            <li>
+                <b>Tương quan tổng thể rất yếu</b>: Không có cặp Thời tiết × Ô nhiễm nào
+                vượt |r| = 0.35. Ở khí hậu nhiệt đới TP.HCM, nhiệt độ và độ ẩm dao động
+                hẹp quanh năm nên không đủ tạo tín hiệu tương quan mạnh với ô nhiễm.
+            </li>
+            <li>
+                <b>Chu kỳ ngày là yếu tố gây nhiễu</b>: PM2.5 peak sáng sớm (giờ cao điểm),
+                O3 peak chiều (trễ quang hóa 3–5h so với Nhiệt độ peak), NO2 và SO2 tăng theo hoạt động
+                giao thông và công nghiệp — tất cả trùng với chu kỳ nhiệt/ẩm nhưng nguyên nhân thực sự
+                là <em>hoạt động giao thông và công nghiệp</em>, không phải thời tiết.
+            </li>
+            <li>
+                <b>Mùa khô ô nhiễm hơn 34%</b> — nhưng nhiệt độ 2 mùa gần như bằng nhau.
+                Với PM2.5: yếu tố quyết định là <em>thiếu mưa rửa trôi</em>
+                và nghịch nhiệt giữ bụi lơ lửng. Với O3: mùa mưa nhiều mây che khuất
+                ánh sáng mặt trời làm <em>phản ứng quang hóa suy yếu</em> — hai chất cùng pattern
+                mùa nhưng cơ chế hoàn toàn khác nhau.
+            </li>
+            <li>
+                <b>Hàm ý</b>: Chính sách giảm ô nhiễm tại TP.HCM cần tập trung vào
+                <em>kiểm soát nguồn phát thải</em> (giao thông, công nghiệp) thay vì
+                chờ đợi điều kiện thời tiết thuận lợi — vì thời tiết chỉ điều tiết
+                mức độ tích tụ, không quyết định lượng phát thải.
+            </li>
+        </ol>
+    """
+    render_conclusion_box(content_html, accent_color="#1F8A70")
 
 
 # ──────────────── MAIN ─────────────────────────────────────────
 def main():
-    st.set_page_config(
-        page_title="Goal 3 — Thời tiết & Ô nhiễm | HCMC Air Quality",
-        page_icon="🌤️",
-        layout="wide",
+    # Note: st.set_page_config is handled by app.py
+
+    inject_global_css()
+
+    render_page_header(
+        "Tác động của thời tiết đến ô nhiễm",
+        "Dashboard phân tích mối liên hệ giữa nhiệt độ, độ ẩm và nồng độ các chất ô nhiễm tại TP.HCM (02/2021 – 06/2022)"
     )
-    st.markdown(
-        "<h1 style='font-family:Segoe UI; color:#16324F;'>"
-        "🌤️ Mục tiêu 3 — Tác động của Thời tiết đến Ô nhiễm"
-        "</h1>",
-        unsafe_allow_html=True,
-    )
-    st.caption("Dashboard phân tích mối liên hệ giữa nhiệt độ, độ ẩm và nồng độ các chất ô nhiễm tại TP.HCM (02/2021 – 06/2022)")
-    st.markdown("---")
 
     # Load data
     if not DATA_PATH.exists():
@@ -573,15 +563,14 @@ def main():
         st.warning("Không có dữ liệu sau khi lọc.")
         return
 
-    st.sidebar.metric("📊 Số bản ghi", f"{len(filtered):,}")
 
     # Render sections
     render_section1(filtered)
-    st.markdown("---")
+    render_divider()
     render_section2(filtered, poll_focus)
-    st.markdown("---")
+    render_divider()
     render_section3(filtered)
-    st.markdown("---")
+    render_divider()
     render_section4(filtered)
     render_conclusion()
 

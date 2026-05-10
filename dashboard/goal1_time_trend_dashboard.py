@@ -18,6 +18,13 @@ import streamlit as st
 from scipy import stats
 from scipy.stats import gaussian_kde
 
+from dashboard.ui_theme import (
+    inject_global_css, render_page_header, render_sidebar_header, render_section_header,
+    render_divider, render_standard_sidebar, render_insight_box
+)
+
+_insight_box = render_insight_box
+
 # ── Constants ────────────────────────────────────────────────────────────────
 DATA_PATH = Path(__file__).parent.parent / "data" / "cleaned" / "Air_Quality_HCMC_Cleaned.csv"
 
@@ -64,49 +71,14 @@ def load_data() -> pd.DataFrame:
 
 # ── Sidebar filters ───────────────────────────────────────────────────────────
 def build_sidebar(df: pd.DataFrame):
-    """
-    Render sidebar widgets and return the user-selected filter values.
-    Returns (start_date, end_date, selected_stations).
-    """
-    st.sidebar.title("🔧 Bộ lọc")
-
-    # Date range
-    min_date = df["Datetime"].dt.date.min()
-    max_date = df["Datetime"].dt.date.max()
-
-    st.sidebar.markdown("#### 📅 Khoảng thời gian")
-    date_range = st.sidebar.date_input(
-        label="Chọn khoảng ngày",
-        value=(min_date, max_date),
-        min_value=min_date,
-        max_value=max_date,
+    """Render sidebar chuẩn và trả về (start_date, end_date, selected_stations)."""
+    result = render_standard_sidebar(
+        df,
+        datetime_col="Datetime",
+        station_col="Station_No",
+        sidebar_key_prefix="g1",
     )
-
-    # Gracefully handle the case where the user has only picked one date
-    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-        start_date, end_date = date_range
-    else:
-        start_date = end_date = date_range[0] if date_range else min_date
-
-    # Station multiselect
-    all_stations = sorted(df["Station_No"].unique().tolist())
-    st.sidebar.markdown("#### 🏭 Trạm quan trắc")
-    selected_stations = st.sidebar.multiselect(
-        label="Chọn trạm (Station_No)",
-        options=all_stations,
-        default=all_stations,
-        format_func=lambda s: f"Trạm {s}",
-    )
-
-    st.sidebar.markdown("---")
-    st.sidebar.caption(
-        f"Dữ liệu sạch: **{len(df):,}** bản ghi  \n"
-        f"Từ {min_date} đến {max_date}  \n"
-        "flag = 0 (tin cậy) và flag = 1 (hợp lệ, chưa xác nhận đầy đủ).  \n"
-        "Loại bỏ flag = 2 (sensor offline / NaN)."
-    )
-
-    return start_date, end_date, selected_stations
+    return result["start_date"], result["end_date"], result["stations"]
 
 
 # ── Filtering ─────────────────────────────────────────────────────────────────
@@ -128,7 +100,6 @@ def apply_filters(
 # ── Section 1: KPI cards ──────────────────────────────────────────────────────
 def render_kpis(df: pd.DataFrame) -> None:
     """Display top-level KPI metric cards."""
-    st.subheader("📌 Tổng quan")
 
     avg_pm25 = df["PM2.5"].mean()
     avg_temp = df["Temperature"].mean()
@@ -145,8 +116,8 @@ def render_kpis(df: pd.DataFrame) -> None:
     c1.metric(
         label="PM2.5 trung bình",
         value=f"{avg_pm25:.1f} µg/m³",
-        delta=f"{avg_pm25 - WHO_PM25:+.1f} so với WHO ({WHO_PM25})",
-        delta_color="inverse",   # red when above guideline
+        delta=f"+{avg_pm25:.1f} (Hiện tại)", # Dùng + để hiện màu xanh theo yêu cầu
+        delta_color="normal",
     )
     c2.metric(
         label="Nhiệt độ trung bình",
@@ -157,37 +128,15 @@ def render_kpis(df: pd.DataFrame) -> None:
         value=f"{avg_hum:.1f} %",
     )
     c4.metric(
-        label="% ngày vượt ngưỡng WHO",
+        label="% ngày vượt WHO",
         value=f"{pct_above_who:.1f} %",
-        delta=f"Trung bình 24h > {WHO_PM25} µg/m³",
-        delta_color="off",
+        delta=f"Ngưỡng > {WHO_PM25} µg/m³",
+        delta_color="off", # Chữ khác màu xám
     )
 
 
 # ── Shared helper: render insight box ────────────────────────────────────────
-def _insight_box(lines: list[str]) -> None:
-    """
-    Render a styled insight box with bullet points.
-    lines: list of strings, each becomes one bullet.
-    """
-    bullets = "".join(f"<li style='margin:4px 0'>{l}</li>" for l in lines)
-    st.markdown(
-        f"""
-        <div style="
-            background:#F0F7FF;
-            border-left:4px solid #1E88E5;
-            border-radius:8px;
-            padding:12px 16px;
-            margin-top:8px;
-        ">
-            <div style="color:#1E88E5;font-weight:bold;margin-bottom:6px">💡 Insight</div>
-            <ul style="margin:0;padding-left:18px;color:#333;font-size:14px">
-                {bullets}
-            </ul>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+
 
 
 def _insight_chart1(df: pd.DataFrame) -> None:
@@ -391,7 +340,7 @@ def render_chart1_pm25_trend(df: pd.DataFrame) -> None:
     Chart 1: PM2.5 xu hướng theo thời gian.
     Fix 3: Hiển thị warning nếu date range < 7 ngày thay vì vẽ rolling chart.
     """
-    st.subheader("📈 Chart 1 — Xu hướng PM2.5 theo thời gian (Rolling 7 ngày)")
+    render_section_header("Xu hướng PM2.5 theo thời gian (Rolling 7 ngày)")
 
     # Fix 3: guard — rolling 7 ngày cần ít nhất 7 ngày dữ liệu
     n_days = df["Datetime"].dt.date.nunique()
@@ -538,7 +487,7 @@ def render_chart2_heatmap(df: pd.DataFrame) -> None:
     Trục X = giờ (0–23), Trục Y = tháng (1–12).
     Màu gradient: trắng → cam → đỏ đậm.
     """
-    st.subheader("🌡️ Chart 2 — Heatmap PM2.5 theo Giờ × Tháng")
+    render_section_header("Heatmap PM2.5 theo Giờ × Tháng")
 
     tmp = df.copy()
     tmp["hour"]  = tmp["Datetime"].dt.hour
@@ -749,7 +698,7 @@ def render_chart3_co_heatmap(df: pd.DataFrame) -> None:
     Lọc CO < 0 và CO > percentile 99 trước khi tính pivot.
     Gradient: trắng → xanh lá nhạt → xanh lá đậm.
     """
-    st.subheader("🟢 Chart 3 — Heatmap CO trung bình theo Giờ × Tháng")
+    render_section_header("Heatmap CO trung bình theo Giờ × Tháng")
 
     tmp = df.copy()
     tmp["hour"]  = tmp["Datetime"].dt.hour
@@ -848,7 +797,7 @@ def render_chart4_normalized_trend(df: pd.DataFrame) -> None:
     Chart 4: Xu hướng tháng của PM2.5, CO, NO2 sau min-max normalization.
     Vẽ 3 đường trên cùng trục Y (0–1), nền vàng mùa khô.
     """
-    st.subheader("📊 Chart 4 — Xu hướng PM2.5, CO, NO2 theo tháng (chuẩn hóa)")
+    render_section_header("Xu hướng PM2.5, CO, NO2 theo tháng (chuẩn hóa)")
 
     tmp = df.copy()
     tmp["YearMonth"] = tmp["Datetime"].dt.to_period("M")
@@ -899,7 +848,7 @@ def render_chart4_normalized_trend(df: pd.DataFrame) -> None:
             center_rain = rain_start + (rain_end - rain_start) / 2
             if not rain_label_added:
                 fig.add_annotation(
-                    x=center_rain, y=1.06, yref="paper",
+                    x=center_rain, y=1.0, yref="paper",
                     text="Mùa mưa",
                     showarrow=False,
                     font=dict(size=11, color="#888888"),
@@ -965,7 +914,7 @@ def render_chart4_normalized_trend(df: pd.DataFrame) -> None:
             title=dict(text="Chất ô nhiễm"),
             orientation="h",
             yanchor="bottom", y=1.02,
-            xanchor="left",   x=0,
+            xanchor="center", x=0.5,
             bgcolor="rgba(255,255,255,0.8)",
             bordercolor="#CCCCCC",
             borderwidth=1,
@@ -1007,7 +956,7 @@ def render_chart5_hourly_drilldown(df: pd.DataFrame, start_date, end_date) -> No
         date_label    = f"{start_date.strftime('%d/%m/%Y')} đến {end_date.strftime('%d/%m/%Y')}"
         title_prefix  = "Chất lượng không khí trung bình theo giờ"
 
-    st.subheader(f"🔍 Chart 5 — {title_prefix} — {date_label}")
+    render_section_header(f"{title_prefix} — {date_label}")
     st.caption("Hiển thị pattern 24 giờ — trung bình toàn khoảng thời gian đã chọn")
 
     # ── Toggle 2 nút pill-style
@@ -1286,56 +1235,33 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
 
+    inject_global_css()
+
+    render_page_header(
+        "Xu hướng ô nhiễm theo thời gian",
+        "Phân tích chất lượng không khí dựa trên dữ liệu từ 6 trạm quan trắc, giai đoạn 2021–2022."
+    )
+
     # ── Pill-style toggle CSS (áp dụng cho st.radio horizontal trong Chart 5)
     st.markdown("""
     <style>
-    /* Ẩn label mặc định của radio group */
     div[data-testid="stRadio"] > label { display: none; }
-
-    /* Container ngang */
     div[data-testid="stRadio"] > div {
-        display: flex;
-        flex-direction: row;
-        gap: 6px;
-        background: transparent;
+        display: flex; flex-direction: row; gap: 6px; background: transparent;
     }
-
-    /* Mỗi option — pill inactive */
     div[data-testid="stRadio"] > div > label {
-        display: flex !important;
-        align-items: center;
-        padding: 4px 14px;
-        border-radius: 20px;
-        border: 1.5px solid #CCCCCC;
-        background: #FFFFFF;
-        color: #888888;
-        font-size: 13px;
-        font-family: Arial, sans-serif;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        white-space: nowrap;
+        display: flex !important; align-items: center;
+        padding: 4px 14px; border-radius: 20px;
+        border: 1.5px solid #CCCCCC; background: #FFFFFF;
+        color: #888888; font-size: 13px; cursor: pointer;
+        transition: all 0.15s ease; white-space: nowrap;
     }
-
-    /* Ẩn radio circle gốc */
-    div[data-testid="stRadio"] > div > label > div:first-child {
-        display: none;
-    }
-
-    /* Pill active — nền xanh đậm, chữ trắng */
+    div[data-testid="stRadio"] > div > label > div:first-child { display: none; }
     div[data-testid="stRadio"] > div > label:has(input:checked) {
-        background: #1A5FA8;
-        border-color: #1A5FA8;
-        color: #FFFFFF;
-        font-weight: 600;
+        background: #16324F; border-color: #16324F; color: #FFFFFF; font-weight: 600;
     }
     </style>
     """, unsafe_allow_html=True)
-
-    st.title("🌫️ Air Quality Dashboard — TP. Hồ Chí Minh")
-    st.markdown(
-        "Phân tích chất lượng không khí dựa trên dữ liệu từ **6 trạm quan trắc** "
-        "trong giai đoạn 2021–2022. Dữ liệu đã được lọc bỏ các bản ghi bị đánh dấu lỗi (flag ≠ 0)."
-    )
 
     # Load data (cached)
     df = load_data()
@@ -1361,22 +1287,13 @@ def main() -> None:
     if filtered_time.empty:
         st.warning("⚠️ Không có dữ liệu sạch trong khoảng thời gian và trạm đã chọn.")
         st.stop()
-
-    # Show active filter summary
     n_days = (end_date - start_date).days + 1
-    st.info(
-        f"📊 Khoảng đã chọn: **{len(filtered_time):,}** bản ghi  |  "
-        f"Trạm: {', '.join(str(s) for s in sorted(selected_stations))}  |  "
-        f"Từ {start_date} đến {end_date}  |  "
-        f"({n_days} ngày)"
-    )
 
-    st.divider()
 
     # ── KPIs — dùng filtered_time (date + station)
     render_kpis(filtered_time)
 
-    st.divider()
+    render_divider()
 
     # ── Chart 1 — dùng filtered_time (date + station)
     render_chart1_pm25_trend(filtered_time)
@@ -1402,10 +1319,9 @@ def main() -> None:
     if n_days <= 7:
         render_chart5_hourly_drilldown(filtered_time, start_date, end_date)
     else:
-        st.info(
-            "💡 **Chart 5 (Drill-down 24 giờ):** Chọn khoảng thời gian ≤ 7 ngày "
-            "để xem phân tích chi tiết theo từng giờ."
-        )
+        render_insight_box([
+            "Chọn khoảng thời gian <b>≤ 7 ngày</b> để xem phân tích chi tiết theo từng giờ."
+        ], title="Phân tích chi tiết 24 giờ", icon_name="trend")
 
 
 if __name__ == "__main__":
