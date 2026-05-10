@@ -82,3 +82,13 @@ pg.run()
 
 # Lưu ý: Phần AI Assistant cũ đã được lược bỏ để khớp với giao diện tối giản trong hình.
 # Nếu bạn muốn thêm lại AI Assistant như một trang riêng, có thể định nghĩa thêm st.Page cho nó.
+
+# Tích hợp Floating Chatbot Widget (Phase 4)
+import os
+try:
+    from dashboard.components.chat_widget import render_chat_widget
+    # Lấy backend URL từ env, mặc định 8000 (FastAPI).
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+    render_chat_widget(backend_url)
+except Exception as e:
+    st.error(f"Cannot load Chatbot Widget: {e}")

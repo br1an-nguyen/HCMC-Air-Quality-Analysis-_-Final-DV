@@ -9,6 +9,7 @@ import uuid
 import pandas as pd
 import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -26,6 +27,22 @@ except ImportError:
 load_dotenv()  # called ONCE — duplicate removed
 
 app = FastAPI(title="HCMC Air Quality AI API", version="2.0.0")
+
+# Cấu hình bảo mật CORS cho Chatbot Widget (Phase 1)
+# Cho phép Streamlit (port 8080, 8501) gọi API an toàn. Cấu hình FRONTEND_URL trên production.
+origins = [
+    os.environ.get("FRONTEND_URL", "http://localhost:8080"),
+    "http://localhost:8501", 
+    "http://localhost:3000",
+    "http://127.0.0.1:8080"
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve generated chart HTML files as static assets.
 # Frontend fetches /charts/output_<chat_id>.html to display Plotly charts.
@@ -233,12 +250,10 @@ PHẦN VI — HÀNH VI TRẢ LỜI
 
 def _strip_code_fences(code: str) -> str:
     """
-    Remove markdown code fences that LLMs sometimes hallucinate inside
-    a JSON string value, even when response_mime_type is application/json.
-
-    FIX 2 (bug): previous code only handled lowercase 'python' and missed
-    double-fence and mixed-case variants.  Using regex is more robust.
+    Remove markdown code fences. handle None input safely.
     """
+    if code is None:
+        return ""
     code = textwrap.dedent(code).strip()
     # Remove leading fence (```python, ```Python, ```py, ``` …)
     code = re.sub(r"^```[a-zA-Z]*\n?", "", code)
@@ -340,11 +355,54 @@ async def chat_with_ai(req: ChatRequest):
             user_message = f"Thông tin context bổ sung: {req.context}\n\n{req.prompt}"
 
         response     = chat_session.send_message(user_message)
-        result_str   = response.text
-        result       = json.loads(result_str)
+        result_str   = response.text.strip()
+        
+        # Tiền xử lý chuỗi: cắt bỏ các mã markdown lừa đảo hoặc Extra data bên ngoài khối JSON.
+        if result_str.startswith("```json"):
+            result_str = result_str[7:]
+        elif result_str.startswith("```"):
+            result_str = result_str[3:]
+        if result_str.endswith("```"):
+            result_str = result_str[:-3]
+        result_str = result_str.strip()
+        
+        # Nếu model trả về nhiều object nối tiếp (vd: `{...}\n{...}`), lấy block đầu tiên.
+        # Dùng JSONDecoder().raw_decode để nhặt đúng 1 object JSON đầu tiên,
+        # bỏ qua văn bản giải thích thừa phía sau (Extra data error).
+        try:
+            # Tìm vị trí bắt đầu của JSON ({ hoặc [)
+            start_bracket = result_str.find('{')
+            start_array = result_str.find('[')
+            start_idx = -1
+            if start_bracket != -1 and start_array != -1:
+                start_idx = min(start_bracket, start_array)
+            else:
+                start_idx = max(start_bracket, start_array)
+            
+            if start_idx == -1:
+                raise json.JSONDecodeError("Không tìm thấy dấu ngoặc mở JSON", result_str, 0)
+                
+            json_snippet = result_str[start_idx:]
+            decoder = json.JSONDecoder()
+            result, end_ptr = decoder.raw_decode(json_snippet)
+        except json.JSONDecodeError:
+            # Fallback cuối cùng: dùng regex tham lam nếu raw_decode thất bại vì lý do nào đó
+            match = re.search(r'(\{.*\}|\[.*\])', result_str, re.DOTALL)
+            if match:
+                result = json.loads(match.group(1))
+            else:
+                raise
 
-        code        = _strip_code_fences(result.get("code", ""))
-        explanation = result.get("explanation", "")
+        # Xử lý trường hợp Gemini trả về mảng [{...}] thay vì dict {...}
+        if isinstance(result, list) and len(result) > 0:
+            result = result[0]
+        elif isinstance(result, list):
+            result = {}
+
+        # Đảm bảo code và explanation luôn là chuỗi (tránh lỗi null từ AI)
+        code_raw    = result.get("code") or ""
+        explanation = result.get("explanation") or ""
+        code        = _strip_code_fences(code_raw)
 
         chat_id = database.log_chat(req.prompt, code, explanation)
 
@@ -376,44 +434,74 @@ async def execute_code(req: ExecuteRequest):
         )
 
     # ── Write code to a unique temp file ─────────────────────
-    # FIX 4: use a unique filename per request to prevent race conditions
-    # when two users execute simultaneously — previously both wrote to the
-    # same run.py and could overwrite each other's code mid-execution.
     run_filename = f"run_{req.chat_id[:8]}.py"
     temp_file    = os.path.join(TEMP_DIR, run_filename)
 
+    # Xóa file output cũ trước khi chạy để tránh hiển thị nhầm biểu đồ của lần chạy trước
+    html_out  = os.path.join(TEMP_DIR, "output.html")
+    png_out   = os.path.join(TEMP_DIR, "output.png")
+    if os.path.exists(html_out): os.remove(html_out)
+    if os.path.exists(png_out): os.remove(png_out)
+
     with open(temp_file, "w", encoding="utf-8") as f:
-        f.write(req.code)
+        # Sử dụng Monkey Patching để đánh chặn các hàm hiển thị biểu đồ mặc định
+        patch_code = """
+import sys, os
+os.makedirs('backend/temp', exist_ok=True)
+try:
+    import plotly.graph_objects as go
+    def _new_show(self, *args, **kwargs):
+        self.write_html('backend/temp/output.html')
+    go.Figure.show = _new_show
+except Exception:
+    pass
+
+try:
+    import matplotlib.pyplot as plt
+    def _new_plt_show(*args, **kwargs):
+        plt.savefig('backend/temp/output.png')
+    plt.show = _new_plt_show
+except Exception:
+    pass
+"""
+        f.write(patch_code + "\n" + req.code)
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+    stdout = ""
+    stderr = ""
+    success = False
+    
     try:
-        # FIX 5: use sys.executable instead of the bare "python" command.
-        # "python" resolves to whichever binary is on PATH — often Python 2
-        # or a system Python that lacks pandas/plotly.  sys.executable is
-        # always the interpreter running this FastAPI process, so it has
-        # exactly the right packages and version.
-        process = subprocess.run(
-            [sys.executable, temp_file],
-            capture_output=True,
-            text=True,
-            timeout=60,              # increased from 20s for heavy analysis
-            cwd=project_root,
-        )
+        try:
+            # sys.executable is always the interpreter running this FastAPI process.
+            process = subprocess.run(
+                [sys.executable, temp_file],
+                capture_output=True,
+                text=True,
+                timeout=60,              # timeout for heavy analysis
+                cwd=project_root,
+            )
+            success = process.returncode == 0
+            stdout  = process.stdout
+            stderr  = process.stderr
+        except subprocess.TimeoutExpired as e:
+            success = False
+            stdout  = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+            stderr  = f"Lỗi: Thực thi quá 60 giây (Timeout).\n{e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or '')}"
+        except KeyboardInterrupt:
+            success = False
+            stdout  = ""
+            stderr  = "Lỗi: Tiến trình thực thi bị ngắt quãng (KeyboardInterrupt: client disconnect hoặc cancel)."
+        except Exception as e:
+            success = False
+            stdout  = ""
+            stderr  = f"Lỗi hệ thống khi chạy code: {str(e)}"
 
-        success = process.returncode == 0
-        database.log_execution(
-            req.code, process.stdout, process.stderr, success, chat_id=req.chat_id
-        )
+        # Ghi log kết quả thực thi
+        database.log_execution(req.code, stdout, stderr, success, chat_id=req.chat_id)
 
         # ── Detect chart output ───────────────────────────────
-        # FIX 6 (root cause of reported bug): previously SYSTEM_PROMPT told
-        # the AI to use fig.show(), which opens a browser on the SERVER and
-        # writes nothing to stdout — the frontend received no chart data.
-        #
-        # Now SYSTEM_PROMPT instructs the AI to use fig.write_html(...) and
-        # plt.savefig(...).  We detect those output files here and return
-        # their URL so the frontend can display them in an iframe or <img>.
         chart_url = None
         html_out  = os.path.join(TEMP_DIR, "output.html")
         png_out   = os.path.join(TEMP_DIR, "output.png")
@@ -426,24 +514,10 @@ async def execute_code(req: ExecuteRequest):
 
         return {
             "success":   success,
-            "stdout":    process.stdout,
-            "stderr":    process.stderr,
-            "chart_url": chart_url,      # None if no chart was generated
+            "stdout":    stdout,
+            "stderr":    stderr,
+            "chart_url": chart_url,
         }
-
-    except subprocess.TimeoutExpired:
-        database.log_execution(
-            req.code, "", "Timeout: quá 60 giây.", False, chat_id=req.chat_id
-        )
-        return {
-            "success":   False,
-            "stdout":    "",
-            "stderr":    "Execution timed out after 60 seconds.",
-            "chart_url": None,
-        }
-    except Exception as exc:
-        database.log_execution(req.code, "", str(exc), False, chat_id=req.chat_id)
-        raise HTTPException(status_code=500, detail=str(exc))
     finally:
         # Clean up the unique temp script (keep output.html / output.png for serving)
         if os.path.exists(temp_file):

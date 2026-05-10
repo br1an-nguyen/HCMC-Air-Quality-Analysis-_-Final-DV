@@ -33,10 +33,10 @@ THRESHOLDS = {"PM2.5": 15.0, "TSP": 150.0, "CO": 4000.0, "O3": 100.0, "SO2": 40.
 
 
 def _sidebar_extra_g2():
-    pollutants = ['PM2.5', 'TSP', 'O3', 'CO', 'NO2', 'SO2']
+    pollutants = ['PM2.5', 'TSP', 'CO', 'O3']
     focus_pollutant = st.selectbox("Chất ô nhiễm chính", options=pollutants, index=0)
 
-    threshold_defaults = {'PM2.5': 15.0, 'TSP': 150.0, 'CO': 4000.0, 'O3': 100.0, 'SO2': 40.0, 'NO2': 25.0}
+    threshold_defaults = {'PM2.5': 15.0, 'TSP': 150.0, 'CO': 4000.0, 'O3': 100.0}
     threshold = st.number_input("Ngưỡng WHO/QCVN (µg/m³)", value=threshold_defaults.get(focus_pollutant, 50.0))
 
     region_opts = ['Nền đô thị', 'Giao thông', 'Công nghiệp', 'Dân cư', 'Giao thông + Dân cư']
@@ -51,6 +51,143 @@ def _sidebar_extra_g2():
         'threshold': threshold,
         'selected_regions': selected_regions,
     }
+
+
+# ============= RADAR INSIGHT HELPERS =============
+RELIABLE_CATEGORIES = ['PM2.5', 'TSP', 'CO', 'O3']
+
+def classify_shape(percs: dict) -> str:
+    """Trả về mô tả ngắn dựa trên % WHO của 4 chất."""
+    pm25_over = percs.get('PM2.5', 0) > 100
+    o3_over   = percs.get('O3', 0)   > 100
+    
+    if pm25_over and o3_over:
+        pm25_dominance = percs['PM2.5'] / (percs['PM2.5'] + percs['O3'])
+        if pm25_dominance > 0.6:
+            return f"Cả PM2.5 ({percs['PM2.5']:.0f}% WHO) lẫn O3 ({percs['O3']:.0f}% WHO) đều vượt ngưỡng, trong đó bụi mịn chiếm ưu thế hơn."
+        elif pm25_dominance < 0.4:
+            return f"Cả PM2.5 ({percs['PM2.5']:.0f}% WHO) lẫn O3 ({percs['O3']:.0f}% WHO) đều vượt ngưỡng, trong đó ozone chiếm ưu thế hơn."
+        else:
+            return f"PM2.5 ({percs['PM2.5']:.0f}% WHO) và O3 ({percs['O3']:.0f}% WHO) vượt ngưỡng ở mức tương đương."
+    elif pm25_over and not o3_over:
+        return f"PM2.5 ({percs['PM2.5']:.0f}% WHO) vượt ngưỡng rõ ràng. O3 nằm sát hoặc dưới ngưỡng ({percs['O3']:.0f}% WHO). Bụi mịn là mối lo trực tiếp duy nhất."
+    elif o3_over and not pm25_over:
+        return f"O3 ({percs['O3']:.0f}% WHO) vượt ngưỡng trong khi PM2.5 ({percs['PM2.5']:.0f}% WHO) vẫn dưới mức khuyến cáo — trạm này tốt hơn về bụi nhưng xấu hơn về khí quang hóa."
+    else:
+        return f"Tất cả 4 chất đều dưới ngưỡng WHO. PM2.5 = {percs['PM2.5']:.0f}%, O3 = {percs['O3']:.0f}%."
+
+def get_axis_dominance_insight(station_df, station_name, region_name):
+    """Tính phần trăm diện tích radar của từng trục dựa trên Capped Values."""
+    capped, uncapped = {}, {}
+    for p in RELIABLE_CATEGORIES:
+        v = station_df[p].median()
+        pct = (v / THRESHOLDS.get(p, 1)) * 100 if pd.notna(v) else 0
+        uncapped[p] = pct
+        capped[p]   = min(pct, 200)
+
+    total_capped = sum(capped.values())
+    if total_capped == 0: return ""
+    
+    dominant_p   = max(capped, key=capped.get)
+    dom_share    = capped[dominant_p] / total_capped * 100
+    actual_val   = uncapped[dominant_p]
+    was_capped   = actual_val > 200
+
+    main_line = (
+        f"<b>Độ lệch trục ({station_name}):</b> "
+        f"Hình đa giác bị kéo lệch mạnh nhất về trục <b>{dominant_p}</b>, "
+        f"chiếm <b>{dom_share:.0f}%</b> tổng diện tích hiển thị (đạt <b>{capped[dominant_p]:.0f}%</b> WHO"
+        + (f", giá trị thực = <b>{actual_val:.0f}%</b>)." if was_capped else f").")
+    )
+    
+    # Kiểm tra trục thứ 2
+    second_over = {p: capped[p] for p in RELIABLE_CATEGORIES if p != dominant_p and capped[p] > 100}
+    if second_over:
+        second_p   = max(second_over, key=second_over.get)
+        main_line += f" Trục <b>{second_p}</b> cũng vượt ngưỡng WHO ({uncapped[second_p]:.0f}%)."
+    
+    return main_line
+
+def get_comparative_insight(worst_row, best_row, df_daily, focus_pollutant) -> list[str]:
+    """So sánh worst vs best station trên radar 4 trục. Trả về list các dòng insight."""
+    w_df = df_daily[df_daily['Station_No'] == worst_row['Station_No']]
+    b_df = df_daily[df_daily['Station_No'] == best_row['Station_No']]
+
+    w_percs = {p: w_df[p].median() / THRESHOLDS.get(p, 1) * 100 for p in RELIABLE_CATEGORIES}
+    b_percs = {p: b_df[p].median() / THRESHOLDS.get(p, 1) * 100 for p in RELIABLE_CATEGORIES}
+
+    insights = []
+    
+    # Pattern 1: Tradeoff
+    tradeoff_axes = []
+    for p in RELIABLE_CATEGORIES:
+        if p == focus_pollutant: continue
+        if b_percs[p] > w_percs[p] and b_percs[p] > 100:
+            gap = b_percs[p] - w_percs[p]
+            tradeoff_axes.append((p, gap, b_percs[p], w_percs[p]))
+    
+    if tradeoff_axes:
+        tradeoff_axes.sort(key=lambda x: x[1], reverse=True)
+        p, gap, b_val, w_val = tradeoff_axes[0]
+        insights.append(
+            f"<b>Nghịch lý không gian:</b> Trạm tốt nhất về <b>{focus_pollutant}</b> "
+            f"({best_row['Location']}, {b_percs.get(focus_pollutant, 0):.0f}% WHO) lại có <b>{p}</b> "
+            f"<b>cao hơn {gap:.0f} điểm %</b> so với trạm tệ nhất "
+            f"({b_val:.0f}% vs {w_val:.0f}% WHO). "
+            f"Hai chất này có nguồn gốc và cơ chế khác nhau — không thể tối ưu đồng thời."
+        )
+
+    # Pattern 2: Dominance
+    all_worse = all(w_percs[p] >= b_percs[p] for p in RELIABLE_CATEGORIES)
+    if all_worse:
+        worst_gap = max(w_percs[p] - b_percs[p] for p in RELIABLE_CATEGORIES)
+        worst_gap_p = max(RELIABLE_CATEGORIES, key=lambda p: w_percs[p] - b_percs[p])
+        insights.append(
+            f"<b>Ô nhiễm toàn diện:</b> {worst_row['Location']} tệ hơn {best_row['Location']} "
+            f"trên cả 4 trục đáng tin cậy. Chênh lệch lớn nhất tại <b>{worst_gap_p}</b> "
+            f"(+{worst_gap:.0f} điểm %). Can thiệp tại đây sẽ cải thiện đa chiều."
+        )
+
+    # Pattern 3: Quantitative Gap
+    pm25_gap = w_percs['PM2.5'] - b_percs['PM2.5']
+    o3_gap   = b_percs['O3']   - w_percs['O3']
+    
+    gap_val = w_df['PM2.5'].median() - b_df['PM2.5'].median()
+    insights.append(
+        f"<b>Khoảng cách định lượng:</b> "
+        f"PM2.5 tại {worst_row['Location']} cao hơn {best_row['Location']} "
+        f"<b>{gap_val:.1f} µg/m³ (+{pm25_gap:.0f} điểm %)</b>. "
+        + (f"Ngược lại, O3 tại {best_row['Location']} cao hơn {o3_gap:.0f} điểm % — trục O3 phản ánh trạng thái ô nhiễm khí quang hóa cao hơn tại khu vực này."
+           if o3_gap > 5 else "O3 ở cả hai trạm ở mức tương đương.")
+    )
+    
+    return insights
+
+def render_radar_insight(worst_row, best_row, df_daily, focus_pollutant):
+    """Hàm main để render toàn bộ insight radar block sử dụng render_insight_box."""
+    w_df = df_daily[df_daily['Station_No'] == worst_row['Station_No']]
+    b_df = df_daily[df_daily['Station_No'] == best_row['Station_No']]
+
+    w_percs = {p: w_df[p].median() / THRESHOLDS.get(p, 1) * 100 for p in RELIABLE_CATEGORIES}
+    b_percs = {p: b_df[p].median() / THRESHOLDS.get(p, 1) * 100 for p in RELIABLE_CATEGORIES}
+
+    w_desc = classify_shape(w_percs)
+    b_desc = classify_shape(b_percs)
+
+    # Xây dựng danh sách các dòng insight (bullet points)
+    lines = [
+        f"<b>{worst_row['Location']} ({worst_row['Region']}):</b> {w_desc}",
+        get_axis_dominance_insight(w_df, worst_row['Location'], worst_row['Region']),
+        f"<b>{best_row['Location']} ({best_row['Region']}):</b> {b_desc}",
+        get_axis_dominance_insight(b_df, best_row['Location'], best_row['Region'])
+    ]
+    
+    # Thêm các dòng so sánh
+    comp_insights = get_comparative_insight(worst_row, best_row, df_daily, focus_pollutant)
+    lines.extend(comp_insights)
+
+    # Render sử dụng component chuẩn của hệ thống
+    render_insight_box(lines, title="Phân Tích Hình Thái Đa Giác", icon_name="analysis")
 
 def main():
     # Note: st.set_page_config is handled by app.py
@@ -87,21 +224,23 @@ def main():
     # ============= GLOBAL THRESHOLDS =============
 
     # ============= FILTER DATA =============
+    # Thêm .copy() để tránh cảnh báo SettingWithCopyWarning của pandas
     df_filtered = df[
         (df['Date'] >= pd.Timestamp(start_date)) &
         (df['Date'] <= pd.Timestamp(end_date))
-    ]
+    ].copy()
 
     df_filtered = df_filtered[
         (df_filtered['Station_No'].isin(selected_station_ids)) &
         (df_filtered['Region'].isin(selected_regions))
-    ]
+    ].copy()
 
-    # Apply data cleaning flag check
+    # Apply data cleaning flag check: Chỉ cho phép các nguồn dữ liệu có flag = 0 mới là hợp lệ
     pollutants_all = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
     for p in pollutants_all:
         flag_col = f"{p}_flag"
         if flag_col in df_filtered.columns:
+            # Những dòng có flag khác 0 sẽ bị gán thành NaN để loại khỏi mọi bước tính toán tiếp theo
             df_filtered.loc[df_filtered[flag_col] != 0, p] = np.nan
 
     # ============= DAILY AGGREGATION =============
@@ -139,7 +278,7 @@ def main():
         st.metric(
             label=f"Trạm cao nhất ({focus_pollutant})",
             value=f"Trạm {int(worst_station['Station_No'])}",
-            delta=f"-{worst_station[focus_pollutant]:.1f} µg/m³", # Dấu - để hiện màu đỏ (ẩn bằng CSS)
+            delta=f"{worst_station[focus_pollutant]:.1f} µg/m³", 
             delta_color="inverse"
         )
 
@@ -178,7 +317,7 @@ def main():
         st.metric(
             label="Vượt chuẩn WHO nhiều nhất",
             value=val_str,
-            delta=f"-{worst_pct:.1f}% số ngày", # Dấu - để hiện màu đỏ
+            delta=f"{worst_pct:.1f}% số ngày", 
             delta_color="inverse"
         )
 
@@ -396,9 +535,10 @@ def main():
 
         # Insight 1: Dominant Pollutant (Facet Bar)
         dominant_insight = (
-            "<b>Phân hóa theo khu vực (Facet Bar):</b> Hồ sơ ô nhiễm phân hóa rõ theo đặc trưng khu vực (đã loại SO2/NO2 do anomaly thiết bị): "
+            "<b>Phân hóa theo khu vực (Facet Bar):</b> Hồ sơ ô nhiễm phân hóa rõ theo đặc trưng khu vực: "
             "PM2.5 là chất chiếm tỷ trọng cao nhất tại khu Dân cư (162% WHO) và Công nghiệp (137% WHO). "
-            "O3 chiếm ưu thế tại khu Giao thông (137%) và Nền đô thị (133%). Không có khu vực nào có hồ sơ an toàn toàn diện."
+            "O3 chiếm ưu thế tại khu Giao thông (137%) và Nền đô thị (133%).
+            "Không có khu vực nào có hồ sơ an toàn toàn diện."
         )
 
         # Insight 2: Volatility (Box Plot)
@@ -439,8 +579,8 @@ def main():
                 help="Tắt: Ép trục ở mức 200% để hình dáng không bị bẹp. Bật: Scale theo tỷ lệ thực tế cao nhất."
             )
 
-        # Gom nhóm các chất: Bụi (PM2.5, TSP) -> Khí đặc trưng giao thông (NO2, CO) -> Khí đặc trưng CN/quang hóa (SO2, O3)
-        categories = ['PM2.5', 'TSP', 'NO2', 'CO', 'SO2', 'O3']
+        # Chỉ sử dụng 4 trục đáng tin cậy
+        categories = ['PM2.5', 'TSP', 'CO', 'O3']
         thresholds_radar = THRESHOLDS
 
         fig_radar = go.Figure()
@@ -516,59 +656,12 @@ def main():
             margin=dict(t=30, b=30, l=30, r=30)
         )
 
-        any_capped = any(
-            (df_daily[df_daily['Station_No'] == row['Station_No']]['SO2'].median() / thresholds_radar.get('SO2', 40.0) * 100) > 200
-            or
-            (df_daily[df_daily['Station_No'] == row['Station_No']]['NO2'].median() / thresholds_radar.get('NO2', 25.0) * 100) > 200
-            for row in stations_to_plot
-        )
-        if any_capped:
-            st.markdown(
-                f"""
-                <div style="background-color: #FFF9E6; border-left: 4px solid #FFCC00; padding: 12px 16px; border-radius: 4px; margin-bottom: 20px;">
-                    <div style="display: flex; align-items: center; gap: 10px; color: #856404; font-size: 14px;">
-                        {get_icon_html("warning")}
-                        <span><b>Lưu ý:</b> Một hoặc nhiều trạm trong radar có SO2/NO2 vượt 200% WHO. Đa giác bị ép tại mức 200% nên hình dạng có thể bị xáo trộn.</span>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        # Lưu ý về SO2/NO2 đã được gỡ bỏ khỏi Radar Chart do anomaly.
 
         st.plotly_chart(fig_radar, use_container_width=True)
 
-        # Generate Shape Profiling & Axis Dominance Insight
-        radar_insights = []
-        for row in stations_to_plot:
-            station_df = df_daily[df_daily['Station_No'] == row['Station_No']]
-            uncapped_values = []
-            max_p = ""
-            max_val = 0
-            for p in categories:
-                v = station_df[p].median()
-                val_perc = (v / thresholds_radar.get(p, 1)) * 100 if pd.notna(v) else 0
-                uncapped_values.append(val_perc)
-                if val_perc > max_val:
-                    max_val = val_perc
-                    max_p = p
-                    
-            total_risk = sum(uncapped_values)
-            if total_risk > 0:
-                ratio = (max_val / total_risk) * 100
-                radar_insights.append(
-                    f"<b>Trạm {row['Location']}:</b> Hình đa giác bị kéo lệch mạnh về trục <b>{max_p}</b>, "
-                    f"chiếm <b>{ratio:.0f}%</b> tổng tỷ trọng đo (đạt mức {max_val:.0f}% WHO)."
-                )
-
-        if focus_pollutant == 'PM2.5':
-            render_insight_box([
-                "Hình đa giác <b>Thanh Đa</b> (worst PM2.5) bị kéo lệch về PM2.5 và TSP — đặc trưng của nguồn bụi thô và mịn từ môi trường sống.",
-                "<b>Quận 3</b> (best PM2.5) có hình đa giác nhỏ hơn về PM2.5/TSP, nhưng các trục NO2/SO2 bị ép tại 200% do anomaly thiết bị — không thể diễn giải tin cậy."
-            ], title="Hình thái mạng lưới (Shape Profiling)", icon_name="location")
-        elif radar_insights:
-            render_insight_box(radar_insights, title="Hình thái & Độ lệch tâm", icon_name="location")
-        else:
-            render_insight_box(["Không đủ dữ liệu để phân tích độ lệch tâm."], title="Phân tích Hình Thái", icon_name="location")
+        # Gọi hệ thống insight 3 tầng mới
+        render_radar_insight(worst_station_row, best_station_row, df_daily, focus_pollutant)
 
         # Pre-processing
         df_filtered['Hour'] = pd.to_numeric(df_filtered['Hour'], errors='coerce')
