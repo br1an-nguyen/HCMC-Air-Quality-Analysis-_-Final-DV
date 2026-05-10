@@ -767,11 +767,12 @@ def main():
                 ], title="Dữ liệu xu hướng", icon_name="trend")
 
         st.markdown("---")
+        st.markdown(f"### {get_icon_html('insight')} Kết luận", unsafe_allow_html=True)
 
         def render_conclusion_internal():
             content_html = f"""
-                <h3 style="margin-top:0; color:#0F172A;">
-                    {get_icon_html("analysis")} Phân bố không gian ô nhiễm tại TPHCM có sự phân hóa rõ rệt nhưng không theo chiều hướng thông thường
+                <h3 style="margin-top:0; color:#1F8A70;">
+                    Phân bố không gian ô nhiễm tại TPHCM có sự phân hóa rõ rệt nhưng không theo chiều hướng thông thường
                 </h3>
                 <ul style="margin-bottom: 0;">
                     <li>
@@ -791,7 +792,7 @@ def main():
                     </li>
                 </ul>
             """
-            render_conclusion_box(content_html, accent_color="#2B7BBB")
+            render_conclusion_box(content_html, accent_color="#1F8A70")
         render_conclusion_internal()
 
 if __name__ == "__main__":

@@ -221,7 +221,64 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                 margin-top: 10px; text-align: center;
             }}
             .chat-chart-iframe {{
-                width: 100%; height: 350px; border: 1px solid #D9E4EC; border-radius: 8px;
+                width: 100%; height: 260px; border: none; border-radius: 8px;
+                pointer-events: none; /* prevent iframe stealing clicks */
+            }}
+
+            /* -- Chart thumbnail wrapper -- */
+            .chat-chart-thumb {{
+                position: relative; margin-top: 10px; cursor: pointer;
+                border: 1px solid #D9E4EC; border-radius: 8px; overflow: hidden;
+            }}
+            .chat-chart-overlay {{
+                position: absolute; inset: 0;
+                background: rgba(22, 50, 79, 0.0);
+                display: flex; align-items: center; justify-content: center;
+                transition: background 0.25s;
+            }}
+            .chat-chart-thumb:hover .chat-chart-overlay {{
+                background: rgba(22, 50, 79, 0.45);
+            }}
+            .btn-view-full {{
+                opacity: 0; transform: scale(0.85);
+                transition: opacity 0.25s, transform 0.25s;
+                background: #2B7BBB; color: white; border: none;
+                padding: 8px 18px; border-radius: 20px; font-size: 13px;
+                font-weight: 600; cursor: pointer; pointer-events: none;
+            }}
+            .chat-chart-thumb:hover .btn-view-full {{
+                opacity: 1; transform: scale(1);
+            }}
+
+            /* -- Viewer Modal -- */
+            #viewer-modal-overlay {{
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.75); z-index: 3000;
+                display: none; align-items: center; justify-content: center;
+                backdrop-filter: blur(4px);
+                pointer-events: auto;
+            }}
+            #viewer-modal {{
+                background: #1E1E1E; width: 92vw; height: 90vh;
+                border-radius: 12px; display: flex; flex-direction: column;
+                box-shadow: 0 24px 64px rgba(0,0,0,0.6); overflow: hidden;
+                border: 1px solid #454545;
+                animation: scaleUp 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            }}
+            #viewer-modal-header {{
+                background: #323233; height: 42px; display: flex; align-items: center;
+                justify-content: space-between; padding: 0 18px;
+                color: #CCCCCC; font-size: 14px; font-weight: 500; flex-shrink: 0;
+                border-bottom: 1px solid #454545;
+            }}
+            #viewer-modal-body {{
+                flex: 1; overflow: hidden; background: #fff;
+            }}
+            #viewer-modal-body iframe {{
+                width: 100%; height: 100%; border: none;
+            }}
+            #viewer-modal-body img {{
+                width: 100%; height: 100%; object-fit: contain; background: #fff;
             }}
             
             /* -- Typing animation -- */
@@ -343,9 +400,12 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                 </button>
             </div>
             
-            <!-- Code Editor Modal -->
-            <div id="code-modal-overlay">
-                <div id="code-modal">
+            <!-- Code Editor Modal — outside chat-panel to avoid clipping -->
+        </div> <!-- end #chat-panel -->
+
+        <!-- Code Editor Modal -->
+        <div id="code-modal-overlay">
+            <div id="code-modal">
                     <!-- Title Bar -->
                     <div id="vscode-titlebar">
                         <div class="vscode-mac-btns">
@@ -399,18 +459,17 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                     </div>
                 </div>
             </div>
-            
-            <!-- Viewer Modal -->
-            <div id="viewer-modal-overlay">
-                <div id="viewer-modal">
-                    <div id="viewer-modal-header">
-                        <span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-4px; margin-right:6px;"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg> Trình xem Biểu đồ</span>
-                        <div style="cursor:pointer; color:#9CDCFE; transition: 0.2s;" onclick="closeViewerModal()" title="Đóng">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>
-                        </div>
+
+        <!-- Viewer Modal -->
+        <div id="viewer-modal-overlay" onclick="handleViewerOverlayClick(event)">
+            <div id="viewer-modal">
+                <div id="viewer-modal-header">
+                    <span><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-4px; margin-right:6px;"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg> Trình xem Biểu đồ</span>
+                    <div style="cursor:pointer; color:#9CDCFE; transition: 0.2s;" onclick="closeViewerModal()" title="Đóng (Esc)">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>
                     </div>
-                    <div id="viewer-modal-body"></div>
                 </div>
+                <div id="viewer-modal-body"></div>
             </div>
         </div>
 
@@ -686,21 +745,35 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
 
             // --- Viewer Modal Logic ---
             window.openViewerModal = function(url, type) {{
+                const overlay = document.getElementById('viewer-modal-overlay');
                 const body = document.getElementById('viewer-modal-body');
                 if (type === 'html') {{
-                    body.innerHTML = `<iframe src="${{url}}"></iframe>`;
+                    body.innerHTML = `<iframe src="${{url}}" allowfullscreen></iframe>`;
                 }} else {{
-                    body.innerHTML = `<img src="${{url}}" />`;
+                    body.innerHTML = `<img src="${{url}}" alt="chart" />`;
                 }}
-                document.getElementById('viewer-modal-overlay').style.display = 'flex';
-                setIframeFullscreen(true);
+                overlay.style.display = 'flex';
             }};
 
             window.closeViewerModal = function() {{
                 document.getElementById('viewer-modal-overlay').style.display = 'none';
                 document.getElementById('viewer-modal-body').innerHTML = '';
-                setIframeFullscreen(false);
             }};
+
+            window.handleViewerOverlayClick = function(e) {{
+                // Close when clicking the dark backdrop (not the modal itself)
+                if (e.target === document.getElementById('viewer-modal-overlay')) {{
+                    closeViewerModal();
+                }}
+            }};
+
+            // Close viewer on Esc key
+            document.addEventListener('keydown', function(e) {{
+                if (e.key === 'Escape') {{
+                    closeViewerModal();
+                    closeCodeModal();
+                }}
+            }});
 
             window.executeCode = async function(chatId, cardId) {{
                 const card = document.getElementById(cardId);
@@ -802,20 +875,23 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
         # Nếu thư viện streamlit-float được cài đặt, thì iframe container phải to ra nhưng trong web
         # Nếu ko cài thì cứ chèn.
         components.html(html_content, height=650)
+
+    # Ép chính iframe của widget cố định ở góc phải dưới để tránh bị lệch khỏi viewport
+    st.markdown(
+        """
+        <style>
+            iframe[title="st.iframe"] {
+                position: fixed !important;
+                right: 20px !important;
+                bottom: 20px !important;
+                width: 400px !important;
+                height: 650px !important;
+                z-index: 1000 !important;
+                border: none !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
         
-    if HAS_FLOAT:
-        # Làm iframe container có pointer-events: none để tránh chặn giao diện Streamlit, 
-        # Widget UI bên trong nó sẽ có pointer-events: auto bù lại.
-        # Đã loại bỏ pointer-events: none vì nó sẽ vô hiệu hóa mọi click vào iframe
-        container.float("position: fixed; bottom: 0; right: 0; width: 400px; height: 650px; z-index: 1000; background: transparent;")
-    else:
-        # Nếu không có float, để một fallback style 
-        st.markdown(
-            """
-            <style>
-               /* Mặc định iframe container hiển thị ở cuối không bị chặn */
-               iframe { border: none; }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
+    # Không dùng streamlit_float nữa để tránh iframe bị đẩy lệch khỏi viewport trên một số trang.
