@@ -322,7 +322,7 @@ def render_section3(df):
         fig, cap = _diurnal_chart_3lines(
             hourly_pm_o3, "Temperature", "Humidity", "O3",
             "Nhiệt độ, Độ ẩm & O3 theo giờ",
-            f"O3 gần bằng 0 suốt đêm, peak lúc {o3_peak_h}h "
+            f"O3 peak lúc {o3_peak_h}h "
             f"— trễ hơn nhiệt độ ~{lag} tiếng do phản ứng quang hóa cần thời gian tích lũy. "
             f"Chính độ trễ này khiến Pearson r thấp dù O3 phụ thuộc rõ vào chu kỳ bức xạ mặt trời."
         )
@@ -392,7 +392,7 @@ def render_section3(df):
             f"Nhìn chung xu hướng cùng chiều với nhiệt độ — phù hợp giả thuyết hoạt động công nghiệp tăng theo mùa khô. "
             f"Tuy nhiên {so2_trough_m} là ngoại lệ khi nhiệt độ tăng nhứng SO2 lại chạm đáy — "
             f"có thể do các yếu tố khác can thiệp (mưa lớn cuối mùa…). "
-            f"Do đó, Không có tương quan trực tiếp giưa nhiệt độ và SO2 mà "
+            f"Do đó, Không có tương quan trực tiếp giưa nhiệt độ và SO2, mà cả hai cùng chịu ảnh hưởng của yếu tố mùa vụ khác (công nghiệp, mưa...)"
         )
 
 
@@ -518,7 +518,7 @@ def render_conclusion():
                 là <em>hoạt động giao thông và công nghiệp</em>, không phải thời tiết.
             </li>
             <li>
-                <b>Mùa khô ô nhiễm hơn 26.6%</b> — nhưng nhiệt độ 2 mùa gần như bằng nhau.
+                <b>Mùa khô ô nhiễm hơn</b> — nhưng nhiệt độ 2 mùa gần như bằng nhau.
                 Với PM2.5: yếu tố quyết định là <em>thiếu mưa rửa trôi</em>
                 và nghịch nhiệt giữ bụi lơ lửng. Với O3: mùa mưa nhiều mây che khuất
                 ánh sáng mặt trời làm <em>phản ứng quang hóa suy yếu</em> — hai chất cùng pattern
