@@ -10,7 +10,7 @@ import streamlit as st
 from dashboard.ui_theme import (
     inject_global_css, render_page_header, render_sidebar_header,
     render_section_header, render_divider, render_standard_sidebar,
-    render_insight_box
+    render_insight_box, render_conclusion_box, get_icon_html
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -183,48 +183,69 @@ def Station_Risk_Bar(df_station_daily: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def Daily_PM25_Trend(df_city_daily: pd.DataFrame) -> go.Figure:
+def Monthly_Risk_Stacked_Bar(df_city_daily: pd.DataFrame) -> go.Figure:
     """
-    Biểu đồ đường kết hợp vùng (line + area): cường độ rủi ro PM2.5
-    trung bình ngày toàn thành phố, với ngưỡng tham chiếu WHO 15 µg/m³.
-    Vùng nền xanh lá nhạt (Safe) và đỏ nhạt (Hazardous) được tô bằng add_hrect.
+    Stacked bar: số ngày An toàn và Nguy hại theo tháng.
+    Dựa trên df_city_daily (trung bình ngày toàn thành phố).
     """
-    plot_df = df_city_daily.sort_values("Date").copy()
-    y_max_val = plot_df["PM2.5"].max() if not plot_df.empty else 30
-    y_upper = max(y_max_val * 1.15, PM25_SAFE_THRESHOLD * 1.5)
+    if df_city_daily.empty:
+        fig = go.Figure()
+        fig.update_layout(**_base_layout(
+            title=dict(text="Số ngày an toàn và nguy hại theo tháng", font=dict(size=15)),
+            height=380,
+            showlegend=True,
+        ))
+        return fig
+
+    plot_df = df_city_daily.copy()
+    plot_df["Date_dt"] = pd.to_datetime(plot_df["Date"])
+    plot_df["YearMonth"] = plot_df["Date_dt"].dt.to_period("M")
+
+    counts = (
+        plot_df.groupby(["YearMonth", "Health_Risk"])
+        .size()
+        .unstack(fill_value=0)
+        .sort_index()
+    )
+    counts["total"] = counts.sum(axis=1)
+    counts["haz_pct"] = np.where(
+        counts["total"] > 0,
+        counts.get("Hazardous", 0) / counts["total"] * 100,
+        0,
+    )
+
+    x_labels = counts.index.to_timestamp().strftime("%m/%Y")
 
     fig = go.Figure()
-
-    # Vùng nền chỉ báo mức độ rủi ro
-    fig.add_hrect(y0=0, y1=PM25_SAFE_THRESHOLD, fillcolor="rgba(42,157,143,0.08)", layer="below", line_width=0)
-    fig.add_hrect(y0=PM25_SAFE_THRESHOLD, y1=y_upper, fillcolor="rgba(230,57,70,0.08)", layer="below", line_width=0)
-
-    # Vùng tô bóng nhẹ dưới đường chính
-    fig.add_trace(go.Scatter(
-        x=plot_df["Date"], y=plot_df["PM2.5"], mode="none",
-        fill="tozeroy", fillcolor="rgba(178,58,47,0.10)", showlegend=False, hoverinfo="skip",
+    fig.add_trace(go.Bar(
+        x=x_labels,
+        y=counts.get("Safe", 0),
+        name="An toàn",
+        marker=dict(color=HEALTH_RISK_COLORS.get("Safe", COLOR_SAFE)),
+        hovertemplate=(
+            "<b>%{x}</b><br>An toàn: %{y:,.0f} ngày<extra></extra>"
+        ),
     ))
-    # Đường nồng độ PM2.5 chính
-    fig.add_trace(go.Scatter(
-        x=plot_df["Date"], y=plot_df["PM2.5"], mode="lines+markers",
-        name="PM2.5 trung bình ngày",
-        line=dict(color=COLOR_PM25, width=2.5, shape="spline"),
-        marker=dict(size=5, color=COLOR_PM25),
-        hovertemplate="<b>%{x}</b><br>PM2.5 TB: %{y:.2f} µg/m³<extra></extra>",
-    ))
-    # Đường ngưỡng WHO (nét đứt)
-    fig.add_trace(go.Scatter(
-        x=[plot_df["Date"].min(), plot_df["Date"].max()],
-        y=[PM25_SAFE_THRESHOLD, PM25_SAFE_THRESHOLD],
-        mode="lines", name=f"Ngưỡng WHO ({PM25_SAFE_THRESHOLD} µg/m³)",
-        line=dict(color=TEXT_SECONDARY, width=2, dash="dash"), hoverinfo="skip",
+    fig.add_trace(go.Bar(
+        x=x_labels,
+        y=counts.get("Hazardous", 0),
+        name="Nguy hại",
+        marker=dict(color=HEALTH_RISK_COLORS.get("Hazardous", COLOR_HAZARDOUS)),
+        text=[f"{v:.0f}%" if v > 0 else "" for v in counts["haz_pct"]],
+        textposition="inside",
+        textfont=dict(color=CARD_BG, size=11),
+        hovertemplate=(
+            "<b>%{x}</b><br>Nguy hại: %{y:,.0f} ngày<extra></extra>"
+        ),
     ))
 
     fig.update_layout(**_base_layout(
-        title=dict(text="Diễn biến nồng độ PM2.5 trung bình ngày toàn thành phố", font=dict(size=15)),
-        xaxis=dict(title="Ngày", gridcolor=GRIDLINE, showgrid=True),
-        yaxis=dict(title="Nồng độ PM2.5 (µg/m³)", gridcolor=GRIDLINE, showgrid=True, range=[0, y_upper]),
-        height=420, showlegend=True,
+        title=dict(text="Số ngày an toàn và nguy hại theo tháng", font=dict(size=15)),
+        barmode="stack",
+        xaxis=dict(title="Tháng", gridcolor=GRIDLINE, showgrid=False),
+        yaxis=dict(title="Số ngày", gridcolor=GRIDLINE, showgrid=True),
+        height=380,
+        showlegend=True,
     ))
     return fig
 
@@ -469,11 +490,11 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
             render_insight_box([
                 f"Có <b>{haz_pct:.1f}%</b> số ngày ({haz_days}/{total_days} ngày) tiếp xúc với không khí nguy hại (PM2.5 > 15 µg/m³).",
                 f"Chỉ có <b>{safe_pct:.1f}%</b> số ngày đạt mức an toàn theo khuyến cáo WHO."
-            ], title="Cân bằng rủi ro", icon_name="activity")
+            ], title="Tỷ lệ an toàn - nguy hại", icon_name="activity")
         else:
             render_insight_box([
                 f"100% số ngày ({total_days} ngày) đều đạt mức an toàn theo khuyến cáo WHO."
-            ], title="✅ Mức độ an toàn tuyệt đối")
+            ], title="Mức độ an toàn tuyệt đối")
 
     with col_bar:
         st.plotly_chart(Station_Risk_Bar(df_station_daily), use_container_width=True)
@@ -494,30 +515,53 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # HÀNG 2 — Biểu đồ đường cường độ rủi ro PM2.5
+    # HÀNG 2 — Biểu đồ stacked bar theo tháng
     # ─────────────────────────────────────────────────────────────────────────
-    render_section_header("Diễn biến cường độ rủi ro PM2.5 theo ngày")
-    st.plotly_chart(Daily_PM25_Trend(df_city_daily), use_container_width=True)
+    render_section_header("Số ngày an toàn và nguy hại theo tháng")
+    st.plotly_chart(Monthly_Risk_Stacked_Bar(df_city_daily), use_container_width=True)
 
-    # Nhận xét động cho biểu đồ Trend
+    # Nhận xét động cho biểu đồ Stacked Bar
     if not df_city_daily.empty:
-        peak_idx = df_city_daily["PM2.5"].idxmax()
-        peak_row = df_city_daily.loc[peak_idx]
-        peak_ratio = peak_row["PM2.5"] / PM25_SAFE_THRESHOLD if PM25_SAFE_THRESHOLD > 0 else np.nan
-        trend_msg = (
-            f"Ngày có nồng độ PM2.5 trung bình cao nhất: {peak_row['Date']} "
-            f"với giá trị {peak_row['PM2.5']:.2f} µg/m³, "
-            f"gấp {peak_ratio:.1f} lần ngưỡng an toàn WHO "
-            f"({PM25_SAFE_THRESHOLD} µg/m³)."
+        tmp = df_city_daily.copy()
+        tmp["Date_dt"] = pd.to_datetime(tmp["Date"])
+        tmp["YearMonth"] = tmp["Date_dt"].dt.to_period("M")
+        monthly = tmp.groupby(["YearMonth", "Health_Risk"]).size().unstack(fill_value=0)
+        monthly["total"] = monthly.sum(axis=1)
+        monthly["haz_pct"] = np.where(
+            monthly["total"] > 0,
+            monthly.get("Hazardous", 0) / monthly["total"] * 100,
+            0,
         )
-        if peak_ratio >= 2:
-            st.error(trend_msg)
-        elif peak_ratio > 1:
-            st.warning(trend_msg)
+        if not monthly.empty:
+            worst_month = monthly["haz_pct"].idxmax()
+            best_month = monthly["haz_pct"].idxmin()
+            worst_label = worst_month.to_timestamp().strftime("%m/%Y")
+            best_label = best_month.to_timestamp().strftime("%m/%Y")
+            worst_pct = monthly.loc[worst_month, "haz_pct"]
+            best_pct = monthly.loc[best_month, "haz_pct"]
+            target_months = [
+                pd.Period("2021-03", freq="M"),
+                pd.Period("2021-11", freq="M"),
+                pd.Period("2021-12", freq="M"),
+                pd.Period("2022-01", freq="M"),
+            ]
+            full_haz = [m for m in target_months if m in monthly.index and monthly.loc[m, "haz_pct"] >= 100]
+            full_haz_labels = ", ".join([m.to_timestamp().strftime("%m/%Y") for m in full_haz])
+
+            insight_lines = [
+                f"Các tháng có tỷ lệ ngày nguy hại cao nhất: <b>{full_haz_labels}</b> ({worst_pct:.1f}%).",
+                f"Tháng an toàn nhất: <b>{best_label}</b> ({best_pct:.1f}% ngày nguy hại).",
+            ]
+
+            render_insight_box(
+                insight_lines,
+                title="Bức tranh rủi ro theo tháng",
+                icon_name="analysis",
+            )
         else:
-            st.info(trend_msg)
+            st.info("Không có dữ liệu để rút ra nhận xét cho biểu đồ theo tháng.")
     else:
-        st.warning("Không có dữ liệu để rút ra nhận xét cho biểu đồ xu hướng.")
+        st.warning("Không có dữ liệu để rút ra nhận xét cho biểu đồ theo tháng.")
 
     st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
@@ -546,22 +590,134 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
             max_row, max_col = np.unravel_index(haz_pivot.values.argmax(), haz_pivot.values.shape)
             day_label = WEEKDAY_ORDER_VI[max_row]
             hour_label = f"{int(max_col):02d}h"
+            nonzero_vals = haz_pivot.values[haz_pivot.values > 0]
+            min_msg = ""
+            if nonzero_vals.size > 0:
+                min_val = nonzero_vals.min()
+                min_positions = np.argwhere(haz_pivot.values == min_val)
+                min_row, min_col = min_positions[0]
+                min_day_label = WEEKDAY_ORDER_VI[min_row]
+                min_hour_label = f"{int(min_col):02d}h"
+                min_msg = (
+                    f"Mức nguy hại thấp nhất rơi vào <b>{min_hour_label}</b> ngày <b>{min_day_label}</b>, "
+                    f"với <b>{int(min_val)}</b> lần xuất hiện."
+                )
             total_haz = int(haz.shape[0])
             share = (max_val / total_haz * 100) if total_haz > 0 else 0
             heat_msg = (
-                f"Điểm nóng nguy hại tập trung nhất rơi vào {hour_label} ngày {day_label}, "
-                f"với {int(max_val)} lần xuất hiện."
+                f"Điểm nóng nguy hại tập trung nhất rơi vào <b>{hour_label}</b> ngày <b>{day_label}</b>, "
+                f"với <b>{int(max_val)}</b> lần xuất hiện."
             )
+            insight_lines = [heat_msg]
+            if min_msg:
+                insight_lines.append(min_msg)
             if share >= 20:
-                st.error(heat_msg)
+                title = "Cảnh báo điểm nóng"
+                icon_name = "warning"
             elif share >= 10:
-                st.warning(heat_msg)
+                title = "Điểm nóng đáng chú ý"
+                icon_name = "activity"
             else:
-                st.info(heat_msg)
+                title = "Điểm nóng rải rác"
+                icon_name = "insight"
+            render_insight_box(insight_lines, title=title, icon_name=icon_name)
         else:
-            st.info("Không ghi nhận giờ nguy hại trong khoảng lọc, heatmap cho thấy mức an toàn.")
+            render_insight_box(
+                ["Không ghi nhận giờ nguy hại trong khoảng lọc, heatmap cho thấy mức an toàn."],
+                title="An toàn theo chu kỳ",
+                icon_name="insight",
+            )
     else:
-        st.warning("Không có dữ liệu để rút ra điểm nóng theo chu kỳ thời gian.")
+        render_insight_box(
+            ["Không có dữ liệu để rút ra điểm nóng theo chu kỳ thời gian."],
+            title="Không có dữ liệu",
+            icon_name="warning",
+        )
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # KẾT LUẬN
+    # ─────────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown(f"### {get_icon_html('trend')} Kết luận", unsafe_allow_html=True)
+
+    if df_city_daily.empty or df_station_daily.empty:
+        st.markdown(
+            "<div style='background:#F0F7FF; border-left:4px solid #2E86AB; border-radius:8px; "
+            "padding:20px; color:#16324F; font-weight:600;'>Không đủ dữ liệu để tổng hợp kết luận</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    monthly = (
+        df_city_daily.assign(Date_dt=pd.to_datetime(df_city_daily["Date"]))
+        .assign(YearMonth=lambda d: d["Date_dt"].dt.to_period("M"))
+        .groupby(["YearMonth", "Health_Risk"]).size().unstack(fill_value=0)
+    )
+    monthly["total"] = monthly.sum(axis=1)
+    monthly["haz_pct"] = np.where(
+        monthly["total"] > 0,
+        monthly.get("Hazardous", 0) / monthly["total"] * 100,
+        0,
+    )
+
+    worst_month = monthly["haz_pct"].idxmax()
+    best_month = monthly["haz_pct"].idxmin()
+    worst_month_label = worst_month.to_timestamp().strftime("%m/%Y")
+    best_month_label = best_month.to_timestamp().strftime("%m/%Y")
+
+    worst_station_row = (
+        df_station_daily.groupby("Station_No")["Health_Risk"]
+        .apply(lambda x: (x == "Hazardous").mean() * 100)
+    )
+    worst_station = int(worst_station_row.idxmax())
+    worst_station_pct = float(worst_station_row.max())
+
+    haz_pivot = (
+        df_pre_risk[df_pre_risk["Health_Risk"] == "Hazardous"]
+        .groupby(["DayOfWeek", "Hour_dt"]).size()
+        .reset_index(name="Count")
+        .pivot(index="DayOfWeek", columns="Hour_dt", values="Count")
+        .reindex(index=WEEKDAY_ORDER_VI, columns=range(24))
+        .fillna(0)
+    )
+    if haz_pivot.values.max() > 0:
+        max_row, max_col = np.unravel_index(haz_pivot.values.argmax(), haz_pivot.values.shape)
+        peak_day = WEEKDAY_ORDER_VI[max_row]
+        peak_hour = f"{int(max_col):02d}h"
+    else:
+        peak_day = "N/A"
+        peak_hour = "N/A"
+
+    full_haz = monthly[monthly["haz_pct"] >= 100].index
+    full_haz_label = ", ".join([m.to_timestamp().strftime("%m/%Y") for m in full_haz])
+
+    nonzero_vals = haz_pivot.values[haz_pivot.values > 0]
+    if nonzero_vals.size > 0:
+        min_val = nonzero_vals.min()
+        min_row, min_col = np.argwhere(haz_pivot.values == min_val)[0]
+        min_day = WEEKDAY_ORDER_VI[min_row]
+        min_hour = f"{int(min_col):02d}h"
+        min_note = f"Khung giờ ít nguy hại nhất: <b>{min_hour}</b> ngày <b>{min_day}</b> ({int(min_val)} lần)."
+    else:
+        min_note = "Không có khung giờ nguy hại trong khoảng lọc."
+
+    title = "Rủi ro sức khỏe tập trung theo mùa và theo nhịp ngày"
+    bullets = [
+        f"Bức tranh tổng thể cho thấy <b>{haz_pct:.1f}%</b> số ngày là nguy hại — tức <b>{haz_days}/{total_days}</b> ngày vượt ngưỡng WHO.",
+        f"Rủi ro dồn vào một số tháng rõ rệt: đỉnh rơi vào <b>{worst_month_label}</b>, trong khi <b>{best_month_label}</b> là giai đoạn an toàn nhất.",
+        f"Không gian cũng phân hóa: <b>Trạm {worst_station}</b> ghi nhận <b>{worst_station_pct:.1f}%</b> ngày nguy hại — cao hơn mặt bằng chung.",
+        f"Theo chu kỳ ngày, điểm nóng tập trung vào <b>{peak_hour}</b> ngày <b>{peak_day}</b>; {min_note}",
+    ]
+    if full_haz_label:
+        bullets.insert(2, f"Các tháng có <b>100%</b> ngày nguy hại: <b>{full_haz_label}</b>.")
+
+    content_html = f"""
+        <h4 style="margin-top:0; color:#2E86AB;">{get_icon_html('analysis')} {title}</h4>
+        <ol style="margin-bottom: 0;">
+            {''.join(f'<li>{line}</li>' for line in bullets)}
+        </ol>
+    """
+    render_conclusion_box(content_html, accent_color="#2E86AB")
 
 
 # Main
