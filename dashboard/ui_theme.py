@@ -285,8 +285,11 @@ def inject_global_css() -> None:
         margin-bottom: 0;
     }}
 
-    /* ── Ẩn menu mặc định ── */
-    #MainMenu, footer, header {{ visibility: hidden; }}
+    /* ── Ẩn menu mặc định (giữ header để nút sidebar không bị mất) ── */
+    #MainMenu, footer {{ visibility: hidden; }}
+    header {{ visibility: visible; }}
+    [data-testid="stToolbar"] {{ visibility: visible; }}
+    [data-testid="stSidebarCollapsedControl"] {{ visibility: visible; }}
     .block-container {{ padding-top: 1.5rem; padding-bottom: 2rem; }}
     </style>
     """, unsafe_allow_html=True)

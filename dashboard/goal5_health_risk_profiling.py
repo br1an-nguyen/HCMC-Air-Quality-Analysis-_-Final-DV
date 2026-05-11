@@ -347,8 +347,8 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
     inject_global_css()
 
     render_page_header(
-        "Phân tích rủi ro sức khỏe do bụi mịn PM2.5",
-        'Tiêu chí: Ngày "Nguy hại" khi PM2.5 trung bình > 15 µg/m³ (ngưỡng WHO)'
+        "Rủi ro sức khỏe",
+        'Phân tích rủi ro sức khỏe do bụi mịn PM2.5 theo tiêu chí ngày "Nguy hại" khi PM2.5 trung bình > 15 µg/m³ (ngưỡng WHO)'
     )
 
     # ── CSS bổ sung riêng Goal 5 (section-divider) ──

@@ -543,7 +543,7 @@ def main():
 
     render_page_header(
         "Tác động của thời tiết đến ô nhiễm",
-        "Dashboard phân tích mối liên hệ giữa nhiệt độ, độ ẩm và nồng độ các chất ô nhiễm tại TP.HCM (02/2021 – 06/2022)"
+        "Phân tích mối liên hệ giữa nhiệt độ, độ ẩm và nồng độ các chất ô nhiễm tại TP.HCM (02/2021 – 06/2022)"
     )
 
     # Load data
