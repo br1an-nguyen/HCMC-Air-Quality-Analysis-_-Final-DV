@@ -7,9 +7,12 @@ streamlit
 pandas
 numpy
 plotly
+kaleido
 scipy
 statsmodels
 seaborn
 scikit-learn
 matplotlib
 streamlit-float
+google-generativeai
+Pillow

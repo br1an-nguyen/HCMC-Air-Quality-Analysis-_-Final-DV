@@ -485,18 +485,20 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
             let isChatOpen = false;
             let unreadCount = 0;
             let currentChatHistory = [];
-            let codesMap = {{}}; // Maps chat_id -> base64/raw code for execution. But wait, execute only needs chat_id if code implies server pulls it? 
-            // In backend/main.py, ExecuteRequest needs BOTH code and chat_id! We must store the returned code.
+            let codesMap = {{}};     // chat_id -> code string
+            let chartPngMap = {{}};  // chat_id -> PNG base64 (để hỏi AI về chart)
             
             // Load state
             const savedHistory = sessionStorage.getItem('ai_chat_history');
             const savedCodes = sessionStorage.getItem('ai_chat_codes');
+            const savedPngs = sessionStorage.getItem('ai_chart_pngs');
             
             const messagesDiv = document.getElementById('chat-messages');
 
             if (savedHistory) {{
                 currentChatHistory = JSON.parse(savedHistory);
                 if (savedCodes) codesMap = JSON.parse(savedCodes);
+                if (savedPngs) chartPngMap = JSON.parse(savedPngs);
                 renderAllMessages();
             }} else {{
                 // Initial message
@@ -509,6 +511,7 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
             function saveState() {{
                 sessionStorage.setItem('ai_chat_history', JSON.stringify(currentChatHistory));
                 sessionStorage.setItem('ai_chat_codes', JSON.stringify(codesMap));
+                // Không lưu PNG vào sessionStorage (quá lớn) — chỉ giữ trong memory
             }}
 
             function toggleChat() {{
@@ -841,6 +844,15 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                         if (resData.chart_url) {{
                             const fullUrl = `${{BACKEND_URL}}${{resData.chart_url}}`;
                             const bustUrl = fullUrl + "?t=" + Date.now();
+
+                            // Lưu PNG base64 và stdout để dùng cho ask_chart
+                            if (resData.chart_png_b64) {{
+                                chartPngMap[chatId] = resData.chart_png_b64;
+                                // Lưu stdout kèm theo để gửi làm ground truth số liệu
+                                if (resData.stdout) chartPngMap[chatId + '_stdout'] = resData.stdout;
+                                saveState();
+                            }}
+
                             if (resData.chart_url.endsWith('.html')) {{
                                 content += `
                                 <div class="chat-chart-thumb" onclick="openViewerModal('${{bustUrl}}', 'html')">
@@ -852,6 +864,34 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                                 <div class="chat-chart-thumb" onclick="openViewerModal('${{bustUrl}}', 'img')">
                                     <img src="${{bustUrl}}" class="chat-chart-iframe" style="object-fit: contain; background: white;"/>
                                     <div class="chat-chart-overlay"><button class="btn-view-full">🔍 Xem toàn màn</button></div>
+                                </div>`;
+                            }}
+
+                            // Nút hỏi về biểu đồ — chỉ hiện khi có PNG
+                            if (resData.chart_png_b64) {{
+                                const askId = 'ask-chart-' + chatId;
+                                content += `
+                                <div id="${{askId}}" style="margin-top:10px;">
+                                    <button onclick="toggleAskChart('${{chatId}}', '${{askId}}')"
+                                        style="background:#F0F7FF; border:1px solid #2B7BBB; color:#2B7BBB;
+                                               border-radius:8px; padding:6px 14px; font-size:13px;
+                                               cursor:pointer; display:flex; align-items:center; gap:6px; width:100%;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                        Hỏi AI về biểu đồ này
+                                    </button>
+                                    <div id="${{askId}}-form" style="display:none; margin-top:8px;">
+                                        <textarea id="${{askId}}-input" rows="2"
+                                            placeholder="Ví dụ: Trạm nào có PM2.5 cao nhất? Xu hướng như thế nào?"
+                                            style="width:100%; border:1px solid #D9E4EC; border-radius:8px;
+                                                   padding:8px; font-size:13px; resize:none; box-sizing:border-box;
+                                                   font-family:inherit; outline:none;"></textarea>
+                                        <button onclick="askAboutChart('${{chatId}}', '${{askId}}')"
+                                            style="margin-top:6px; background:#2B7BBB; color:white; border:none;
+                                                   border-radius:8px; padding:7px 16px; font-size:13px;
+                                                   cursor:pointer; font-weight:600; width:100%;">
+                                            Gửi câu hỏi →
+                                        </button>
+                                    </div>
                                 </div>`;
                             }}
                         }} else if (resData.stdout) {{
@@ -892,6 +932,67 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                 // Scroll to bottom
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
             }}
+
+            // ── Ask-about-chart helpers ──────────────────────────────
+
+            window.toggleAskChart = function(chatId, askId) {{
+                const form = document.getElementById(askId + '-form');
+                if (!form) return;
+                const isVisible = form.style.display !== 'none';
+                form.style.display = isVisible ? 'none' : 'block';
+                if (!isVisible) {{
+                    setTimeout(() => document.getElementById(askId + '-input')?.focus(), 50);
+                }}
+            }};
+
+            window.askAboutChart = async function(chatId, askId) {{
+                const input = document.getElementById(askId + '-input');
+                const question = input ? input.value.trim() : '';
+                if (!question) return;
+
+                const pngB64 = chartPngMap[chatId];
+                if (!pngB64) {{
+                    addBotMessage('⚠️ Không tìm thấy ảnh biểu đồ. Vui lòng chạy lại code để tạo biểu đồ mới.');
+                    return;
+                }}
+
+                // Ẩn form, hiện trạng thái đang hỏi
+                const form = document.getElementById(askId + '-form');
+                if (form) form.style.display = 'none';
+                input.value = '';
+
+                // Hiện câu hỏi của user trong chat
+                addUserMessage(question);
+                const typingId = addTypingIndicator();
+
+                try {{
+                    const response = await fetch(`${{BACKEND_URL}}/api/ask_chart`, {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{
+                            prompt: question,
+                            image_b64: pngB64,
+                            chart_context: 'Biểu đồ phân tích chất lượng không khí TP.HCM',
+                            stdout: chartPngMap[chatId + '_stdout'] || ''
+                        }})
+                    }});
+
+                    removeElement(typingId);
+
+                    if (!response.ok) {{
+                        const err = await response.text();
+                        addBotMessage(`Lỗi khi hỏi về biểu đồ: ${{err}}`);
+                        return;
+                    }}
+
+                    const data = await response.json();
+                    addBotMessage(data.answer || 'Không có phản hồi từ AI.');
+
+                }} catch(e) {{
+                    removeElement(typingId);
+                    addBotMessage('Lỗi mạng: ' + e.message);
+                }}
+            }};
         </script>
     </body>
     </html>
