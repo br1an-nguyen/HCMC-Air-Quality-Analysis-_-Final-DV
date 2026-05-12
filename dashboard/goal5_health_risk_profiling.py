@@ -268,19 +268,26 @@ def Hazardous_Heatmap(df: pd.DataFrame) -> go.Figure:
     )
 
     custom_scale = [
-        [0.0,  "#FFF5F0"],
-        [0.25, "#FCBBA1"],
-        [0.5,  "#FB6A4A"],
-        [0.75, "#CB181D"],
-        [1.0,  "#67000D"],
+        [0.0,  "#FFFFFF"],
+        [0.35, "#FFCC80"],
+        [0.65, "#FF6600"],
+        [1.0,  "#8B0000"],
     ]
 
+    z_vals = pivot.values.astype(float)
+    z_max = float(z_vals.max()) if z_vals.size else 0.0
+    z_max = max(1.0, z_max)
+
     fig = go.Figure(go.Heatmap(
-        z=pivot.values,
+        z=z_vals,
         x=list(range(24)),
         y=WEEKDAY_ORDER_VI,
         colorscale=custom_scale,
-        colorbar=dict(title="Số lần<br>Nguy hại", title_font=dict(size=11)),
+        zmin=0,
+        zmax=z_max,
+        xgap=1, 
+        ygap=1,
+        colorbar=dict(title="Số lần<br>Nguy hại", title_font=dict(size=11)), 
         hovertemplate=(
             "<b>%{y}</b> — %{x}:00<br>"
             "Số lần nguy hại: %{z:,.0f}<extra></extra>"
