@@ -335,9 +335,9 @@ def _build_gemini_history(history: list[dict]) -> list[dict]:
         role = turn.get("role", "user")
         content = turn.get("content", "")
         if role == "assistant":
-            role = "model"                # Gemini uses "model" not "assistant"
+            role = "model"                
         if role not in ("user", "model"):
-            continue                      # skip unknown roles
+            continue                     
         converted.append({"role": role, "parts": [content]})
     return converted
 
@@ -408,7 +408,7 @@ async def chat_with_ai(req: ChatRequest):
         if AUTO_CONTEXT:
             system_turn += f"\n\nAuto-generated dataset context:\n{AUTO_CONTEXT}"
 
-        # FIX 3: use start_chat() with proper history structure instead of
+        # Use start_chat() with proper history structure instead of
         # concatenating everything into one flat string.
         # The system prompt is injected as the first user→model exchange so
         # Gemini treats it as established context rather than a live request.

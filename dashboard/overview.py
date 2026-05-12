@@ -33,7 +33,6 @@ def main():
     <p style='color:#4F6B7A; font-style:italic;'>Phát triển bởi nhóm nghiên cứu Phân tích Dữ liệu Chất lượng Không khí.</p>
     """, unsafe_allow_html=True)
 
-    st.markdown("### Kết luận nhanh từ Goal 1", unsafe_allow_html=True)
     df = load_data()
     GoalOneConclusion.render(
         station_df=df,
