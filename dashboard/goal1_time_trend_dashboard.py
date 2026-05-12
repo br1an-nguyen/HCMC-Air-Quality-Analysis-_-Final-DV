@@ -1257,13 +1257,6 @@ def render_chart5_hourly_drilldown(df: pd.DataFrame, start_date, end_date) -> No
 
 # ── Main app ──────────────────────────────────────────────────────────────────
 def main() -> None:
-    st.set_page_config(
-        page_title="Air Quality Dashboard — HCMC",
-        page_icon="🌫️",
-        layout="wide",
-        initial_sidebar_state="expanded",
-    )
-
     inject_global_css()
 
     render_page_header(

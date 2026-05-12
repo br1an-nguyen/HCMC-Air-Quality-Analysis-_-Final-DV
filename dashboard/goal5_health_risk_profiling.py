@@ -729,7 +729,6 @@ def render_Health_Risk_Profiling(file_path: str | None = None) -> None:
 
 # Main
 def main() -> None:
-    st.set_page_config(page_title="Dashboard Goal 5", page_icon="", layout="wide")
     render_Health_Risk_Profiling()
 
 

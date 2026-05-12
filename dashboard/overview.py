@@ -1,7 +1,5 @@
 import streamlit as st
 from dashboard.ui_theme import render_page_header, inject_global_css
-from dashboard.goal1_time_trend_dashboard import load_data
-from dashboard.components.goal1_conclusion import GoalOneConclusion
 
 def main():
     inject_global_css()
@@ -32,15 +30,6 @@ def main():
     <hr style='border:none; border-top:1px solid #E5EEF3; margin:24px 0 18px 0;'>
     <p style='color:#4F6B7A; font-style:italic;'>Phát triển bởi nhóm nghiên cứu Phân tích Dữ liệu Chất lượng Không khí.</p>
     """, unsafe_allow_html=True)
-
-    df = load_data()
-    GoalOneConclusion.render(
-        station_df=df,
-        time_df=df,
-        start_date=df["Datetime"].dt.date.min(),
-        end_date=df["Datetime"].dt.date.max(),
-        n_days=df["Datetime"].dt.date.nunique(),
-    )
 
 if __name__ == "__main__":
     main()
