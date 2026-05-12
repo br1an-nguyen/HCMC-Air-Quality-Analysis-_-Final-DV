@@ -448,7 +448,7 @@ def main():
 
     with r1_left:
         render_section_header(
-            "Correlation Heatmap",
+            "Bản đồ nhiệt tương quan",
             "Pearson r · giá trị gốc (flag ≠ 2) · toàn bộ trạm đã chọn"
         )
         z = corr_ov.values

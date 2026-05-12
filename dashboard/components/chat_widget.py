@@ -37,7 +37,7 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
             body {{
                         margin: 0; padding: 0;
                         font-family: 'Segoe UI', Inter, Roboto, sans-serif;
-                        pointer-events: auto; /* allow interactions inside widget */
+                        pointer-events: auto;
                         background: transparent !important;
                     }}
             
@@ -518,12 +518,35 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                     panel.classList.add('open');
                     document.getElementById('notification-badge').style.display = 'none';
                     unreadCount = 0;
-                    // Auto-focus input when opened
                     setTimeout(() => document.getElementById('chat-textarea').focus(), 300);
+                    resizeHostIframe(true);
                 }} else {{
                     panel.classList.remove('open');
+                    // Đợi animation đóng xong (300ms) rồi mới shrink iframe
+                    setTimeout(() => resizeHostIframe(false), 320);
                 }}
             }}
+
+            // Resize iframe chứa widget từ bên trong.
+            // window.frameElement trỏ trực tiếp đến <iframe> element ở parent DOM.
+            function resizeHostIframe(open) {{
+                try {{
+                    const frame = window.frameElement;
+                    if (!frame) return;
+                    if (open) {{
+                        frame.style.width  = '420px';
+                        frame.style.height = '660px';
+                    }} else {{
+                        frame.style.width  = '90px';
+                        frame.style.height = '90px';
+                    }}
+                }} catch(e) {{
+                    // Cross-origin block — fallback: không làm gì, iframe giữ nguyên
+                }}
+            }}
+
+            // Shrink ngay khi load trang (chat chưa mở)
+            resizeHostIframe(false);
 
             function updateBadge() {{
                 if (!isChatOpen) {{
@@ -875,49 +898,25 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
     """
     
     # ── RENDER COMPONENT ──
-    # Tích hợp CSS cho phép con trỏ click xuyên qua (pointer-events: none trên iframe parent nếu cần, 
-    # Nhưng st.components sinh ra iframe nằm trong 1 div. Dùng trick HTML trong container.
-    
     container = st.container()
     with container:
-        # Nếu thư viện streamlit-float được cài đặt, thì iframe container phải to ra nhưng trong web
-        # Nếu ko cài thì cứ chèn.
-        components.html(html_content, height=650)
+        # Bắt đầu nhỏ (90px = launcher only).
+        # Script bên trong iframe sẽ tự resize qua window.frameElement khi chat mở/đóng.
+        components.html(html_content, height=90)
 
-    # Ép chính iframe của widget cố định ở góc phải dưới để tránh bị lệch khỏi viewport
+    # Chỉ cần cố định vị trí iframe — width/height do script bên trong tự quản lý.
     st.markdown(
         """
         <style>
-            /* Ensure widget iframe is on top and receives pointer events */
-            iframe[title^="st."] , iframe[title="st.iframe"], iframe[srcdoc] {
+            iframe[title="st.iframe"] {
                 position: fixed !important;
                 right: 20px !important;
                 bottom: 20px !important;
-                width: 400px !important;
-                height: 650px !important;
                 z-index: 99999 !important;
                 border: none !important;
-                pointer-events: auto !important;
+                transition: width 0.2s ease, height 0.2s ease !important;
             }
-
-            /* Also make sure any overlay elements from Streamlit don't block clicks */
-            .stApp, .main, .block-container { pointer-events: auto !important; }
         </style>
         """,
         unsafe_allow_html=True,
     )
-
-    # Small debug helper: inject script that logs clicks inside the widget iframe
-    st.markdown(
-        """
-        <script>
-        try {
-            // Post a message to the iframe itself for internal debug prints
-            console.log('Chat widget CSS injection complete');
-        } catch(e) { console.log('chat widget debug injection failed', e); }
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
-        
-    # Không dùng streamlit_float nữa để tránh iframe bị đẩy lệch khỏi viewport trên một số trang.
