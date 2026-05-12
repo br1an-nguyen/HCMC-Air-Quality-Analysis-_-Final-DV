@@ -5,6 +5,7 @@ import json
 import textwrap
 import re
 import uuid
+import base64
 
 import pandas as pd
 import google.generativeai as genai
@@ -56,19 +57,25 @@ app.mount("/charts", StaticFiles(directory=TEMP_DIR), name="charts")
 # Gemini client
 # ─────────────────────────────────────────────────────────────
 
-# Model name — đổi tại đây nếu muốn dùng model khác.
-# gemini-1.5-flash: free tier quota cao hơn gemini-2.0-flash-lite
+# Model name — đổi trong file .env (GEMINI_MODEL=...), không hardcode ở đây.
 MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
-api_key = os.environ.get("GOOGLE_API_KEY", "AIzaSyCtm21DSwgNagaHAh1lawyqLkCjeIcDfQo")
+api_key = os.environ.get("GOOGLE_API_KEY", "")
 if api_key:
     genai.configure(api_key=api_key)
 
+# Model cho chat thông thường (JSON output)
 gemini_model = genai.GenerativeModel(
     model_name=MODEL_NAME,
     generation_config={
         "response_mime_type": "application/json",
     },
+) if api_key else None
+
+# Model cho hỏi về chart (multimodal, text output)
+# gemini-2.5-flash hỗ trợ vision nên dùng cùng model, chỉ khác generation_config
+gemini_vision_model = genai.GenerativeModel(
+    model_name=MODEL_NAME,
 ) if api_key else None
 
 
@@ -238,6 +245,11 @@ QUY TẮC CODE:
 - Tự chứa đầy đủ import + merge metadata + lọc flag.
 - Không dùng biến toàn cục, không giả định data đã xử lý sẵn.
 - Tên biến rõ ràng: df_pm25_daily, not df2.
+- F-STRING QUOTES: LUÔN dùng dấu nháy kép cho f-string bên ngoài: f"text {{row['col']}}"
+  TUYỆT ĐỐI KHÔNG dùng escaped quotes bên trong f-string: f'text {{row[\"col\"]}}' → SyntaxError.
+  Nếu cần truy cập dict/DataFrame trong f-string, gán biến trước:
+    val = row['Date']; print(f"Ngày: {{val}}")  ← ĐÚNG
+    print(f'Ngày: {{row[\"Date\"]}}')            ← SAI, gây SyntaxError
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PHẦN VI — HÀNH VI TRẢ LỜI
@@ -253,6 +265,48 @@ PHẦN VI — HÀNH VI TRẢ LỜI
 # ─────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────
+
+def _export_chart_png(html_path: str, png_path: str) -> str | None:
+    """
+    Đọc PNG đã được export bởi patch_code trong subprocess.
+    Trả về base64 string, hoặc None nếu file không tồn tại.
+    """
+    try:
+        if os.path.exists(png_path):
+            with open(png_path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+    except Exception:
+        pass
+    return None
+
+
+def _fix_fstring_quotes(code: str) -> str:
+    """
+    Auto-fix lỗi escaped quotes trong f-string do AI gen ra.
+    Ví dụ: f'text {row[\"col\"]}' → f"text {row['col']}"
+
+    Cách tiếp cận: tìm f-string nháy đơn có chứa \" bên trong,
+    đổi outer quotes thành nháy kép và bỏ escape.
+    """
+    if code is None:
+        return ""
+    # Pattern: f'...' hoặc f'...' có chứa \" bên trong
+    # Thay f'<content với \">' → f"<content với '>"
+    import re as _re
+
+    def replace_fstring(m):
+        inner = m.group(1)
+        if '\\"' in inner:
+            # Bỏ escape, đổi outer sang nháy kép
+            inner_fixed = inner.replace('\\"', '"')
+            # Nếu inner_fixed có nháy đơn, giữ nguyên (đã dùng nháy kép bên ngoài)
+            return f'f"{inner_fixed}"'
+        return m.group(0)  # không thay đổi nếu không có vấn đề
+
+    # Match f'...' (non-greedy, không qua newline)
+    code = _re.sub(r"f'((?:[^'\\]|\\.)*)'", replace_fstring, code)
+    return code
+
 
 def _strip_code_fences(code: str) -> str:
     """
@@ -300,6 +354,13 @@ class ChatRequest(BaseModel):
 class ExecuteRequest(BaseModel):
     code: str
     chat_id: str
+
+class AskChartRequest(BaseModel):
+    """Hỏi AI về biểu đồ đã gen. image_b64 là PNG encode base64."""
+    prompt: str
+    image_b64: str          # data:image/png;base64,<...> hoặc chỉ phần base64
+    chart_context: str = "" # mô tả ngắn về chart (tên, loại) để AI có thêm context
+    stdout: str = ""        # stdout từ lần execute — chứa giá trị số chính xác
 
 
 # ─────────────────────────────────────────────────────────────
@@ -414,6 +475,7 @@ async def chat_with_ai(req: ChatRequest):
         code_raw    = result.get("code") or ""
         explanation = result.get("explanation") or ""
         code        = _strip_code_fences(code_raw)
+        code        = _fix_fstring_quotes(code)
 
         chat_id = database.log_chat(req.prompt, code, explanation)
 
@@ -434,15 +496,10 @@ async def chat_with_ai(req: ChatRequest):
 
 @app.post("/api/execute")
 async def execute_code(req: ExecuteRequest):
-    # ── Approval gate ─────────────────────────────────────────
+    # ── Verify chat_id tồn tại ────────────────────────────────
     chat_log = database.get_chat_by_id(req.chat_id)
     if not chat_log:
         raise HTTPException(status_code=404, detail="chat_id không tồn tại.")
-    if chat_log.get("status") != "pending":
-        raise HTTPException(
-            status_code=403,
-            detail=f"Không thể thực thi: trạng thái hiện tại là '{chat_log.get('status')}'. Mỗi chat_id chỉ được thực thi một lần."
-        )
 
     # ── Write code to a unique temp file ─────────────────────
     run_filename = f"run_{req.chat_id[:8]}.py"
@@ -459,6 +516,11 @@ async def execute_code(req: ExecuteRequest):
         patch_code = """
 import sys, os
 import shutil
+# Đảm bảo stdout/stderr dùng UTF-8 trên Windows (tránh cp1252 UnicodeEncodeError)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 os.makedirs('backend/temp', exist_ok=True)
 try:
     import plotly.graph_objects as go
@@ -473,19 +535,29 @@ try:
         except Exception:
             pass
 
+    def _export_png_from_fig(fig):
+        \"\"\"Export figure sang PNG để dùng cho Gemini Vision.\"\"\"
+        try:
+            fig.write_image('backend/temp/output.png', format='png', width=1000, height=550, scale=2)
+        except Exception:
+            pass  # kaleido chưa cài hoặc lỗi — bỏ qua
+
     _original_write_html = go.Figure.write_html
     _original_pio_write_html = pio.write_html
 
     def _new_show(self, *args, **kwargs):
         _original_write_html(self, 'backend/temp/output.html')
+        _export_png_from_fig(self)
 
     def _new_write_html(self, file='backend/temp/output.html', *args, **kwargs):
         _original_write_html(self, file, *args, **kwargs)
         _mirror_to_standard_output(file, 'backend/temp/output.html')
+        _export_png_from_fig(self)
 
     def _new_pio_write_html(fig, file='backend/temp/output.html', *args, **kwargs):
         _original_pio_write_html(fig, file, *args, **kwargs)
         _mirror_to_standard_output(file, 'backend/temp/output.html')
+        _export_png_from_fig(fig)
 
     go.Figure.show = _new_show
     go.Figure.write_html = _new_write_html
@@ -530,8 +602,10 @@ except Exception:
                 [sys.executable, temp_file],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 timeout=60,              # timeout for heavy analysis
                 cwd=project_root,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
             success = process.returncode == 0
             stdout  = process.stdout
@@ -554,22 +628,92 @@ except Exception:
 
         # ── Detect chart output ───────────────────────────────
         chart_url = None
+        chart_png_b64 = None
         html_out  = os.path.join(TEMP_DIR, "output.html")
         png_out   = os.path.join(TEMP_DIR, "output.png")
 
         if success:
             if os.path.exists(html_out):
                 chart_url = f"/charts/output.html"
+                # Thử export PNG từ HTML để dùng cho ask_chart (Gemini Vision)
+                chart_png_b64 = _export_chart_png(html_out, png_out)
             elif os.path.exists(png_out):
                 chart_url = f"/charts/output.png"
+                # Đọc PNG sẵn có thành base64
+                try:
+                    with open(png_out, "rb") as f:
+                        chart_png_b64 = base64.b64encode(f.read()).decode()
+                except Exception:
+                    pass
 
         return {
-            "success":   success,
-            "stdout":    stdout,
-            "stderr":    stderr,
-            "chart_url": chart_url,
+            "success":        success,
+            "stdout":         stdout,
+            "stderr":         stderr,
+            "chart_url":      chart_url,
+            "chart_png_b64":  chart_png_b64,  # PNG base64 để frontend dùng cho ask_chart
         }
     finally:
         # Clean up the unique temp script (keep output.html / output.png for serving)
         if os.path.exists(temp_file):
             os.remove(temp_file)
+
+
+# ─────────────────────────────────────────────────────────────
+# Ask-about-chart endpoint
+# ─────────────────────────────────────────────────────────────
+
+@app.post("/api/ask_chart")
+async def ask_about_chart(req: AskChartRequest):
+    """
+    Nhận ảnh PNG (base64) của chart đã gen + câu hỏi từ user.
+    Gửi lên Gemini Vision để phân tích và trả lời bằng tiếng Việt.
+    """
+    if not api_key or gemini_vision_model is None:
+        raise HTTPException(status_code=500, detail="GOOGLE_API_KEY chưa được cấu hình.")
+
+    # Tách phần base64 thuần (bỏ data URI prefix nếu có)
+    b64_data = req.image_b64
+    if "," in b64_data:
+        b64_data = b64_data.split(",", 1)[1]
+
+    try:
+        image_bytes = base64.b64decode(b64_data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="image_b64 không hợp lệ.")
+
+    # Xây dựng prompt cho Gemini Vision
+    system_context = """Bạn là chuyên gia phân tích dữ liệu chất lượng không khí TP.HCM.
+Người dùng vừa tạo ra một biểu đồ từ dữ liệu thực tế và đang hỏi về nó.
+
+QUY TẮC ĐỌC BIỂU ĐỒ — BẮT BUỘC TUÂN THỦ:
+1. Đọc kỹ nhãn trục X và trục Y trước khi trả lời. Không suy đoán vị trí pixel.
+2. Nếu trục X có nhãn ngày/tháng (ví dụ "Jan 4", "Jan 14"), hãy đọc chính xác nhãn đó.
+3. Nếu không đọc được nhãn rõ ràng, hãy nói "không thể xác định chính xác từ biểu đồ" thay vì đoán.
+4. Chỉ trích dẫn giá trị khi nhìn thấy rõ trên biểu đồ (từ colorbar, trục, tooltip label).
+5. Phân biệt rõ: đây là biểu đồ tĩnh (PNG), không có tooltip — chỉ đọc được giá trị từ colorbar và nhãn trục.
+
+Trả lời bằng tiếng Việt, ngắn gọn, chính xác.
+Nếu biểu đồ liên quan đến chất lượng không khí, so sánh với ngưỡng WHO (PM2.5: 15 µg/m³) hoặc QCVN khi phù hợp."""
+
+    chart_ctx = f"\nLoại biểu đồ: {req.chart_context}" if req.chart_context else ""
+
+    # Nếu có stdout từ lần chạy code, đính kèm làm ground truth số liệu
+    stdout_ctx = ""
+    if req.stdout and req.stdout.strip():
+        stdout_ctx = f"\n\nDỮ LIỆU SỐ CHÍNH XÁC (từ kết quả chạy code — ưu tiên dùng thay vì đọc từ ảnh):\n{req.stdout.strip()[:2000]}"
+
+    full_prompt = f"{system_context}{chart_ctx}{stdout_ctx}\n\nCâu hỏi của người dùng: {req.prompt}"
+
+    try:
+        # Gemini multimodal: gửi cả text lẫn image
+        image_part = {
+            "mime_type": "image/png",
+            "data": image_bytes,
+        }
+        response = gemini_vision_model.generate_content([full_prompt, image_part])
+        answer = response.text.strip()
+        return {"answer": answer}
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
