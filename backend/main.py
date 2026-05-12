@@ -60,7 +60,7 @@ app.mount("/charts", StaticFiles(directory=TEMP_DIR), name="charts")
 # gemini-1.5-flash: free tier quota cao hơn gemini-2.0-flash-lite
 MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
-api_key = os.environ.get("GOOGLE_API_KEY", "")
+api_key = os.environ.get("GOOGLE_API_KEY", "AIzaSyCtm21DSwgNagaHAh1lawyqLkCjeIcDfQo")
 if api_key:
     genai.configure(api_key=api_key)
 
@@ -458,20 +458,60 @@ async def execute_code(req: ExecuteRequest):
         # Sử dụng Monkey Patching để đánh chặn các hàm hiển thị biểu đồ mặc định
         patch_code = """
 import sys, os
+import shutil
 os.makedirs('backend/temp', exist_ok=True)
 try:
     import plotly.graph_objects as go
+    import plotly.io as pio
+
+    def _mirror_to_standard_output(source_path, target_path):
+        try:
+            source_abs = os.path.abspath(source_path)
+            target_abs = os.path.abspath(target_path)
+            if os.path.exists(source_abs) and source_abs != target_abs:
+                shutil.copyfile(source_abs, target_abs)
+        except Exception:
+            pass
+
+    _original_write_html = go.Figure.write_html
+    _original_pio_write_html = pio.write_html
+
     def _new_show(self, *args, **kwargs):
-        self.write_html('backend/temp/output.html')
+        _original_write_html(self, 'backend/temp/output.html')
+
+    def _new_write_html(self, file='backend/temp/output.html', *args, **kwargs):
+        _original_write_html(self, file, *args, **kwargs)
+        _mirror_to_standard_output(file, 'backend/temp/output.html')
+
+    def _new_pio_write_html(fig, file='backend/temp/output.html', *args, **kwargs):
+        _original_pio_write_html(fig, file, *args, **kwargs)
+        _mirror_to_standard_output(file, 'backend/temp/output.html')
+
     go.Figure.show = _new_show
+    go.Figure.write_html = _new_write_html
+    pio.write_html = _new_pio_write_html
 except Exception:
     pass
 
 try:
     import matplotlib.pyplot as plt
+    _original_savefig = plt.savefig
+
     def _new_plt_show(*args, **kwargs):
-        plt.savefig('backend/temp/output.png')
+        _original_savefig('backend/temp/output.png')
+
+    def _new_savefig(fname='backend/temp/output.png', *args, **kwargs):
+        _original_savefig(fname, *args, **kwargs)
+        try:
+            fname_abs = os.path.abspath(fname)
+            target_abs = os.path.abspath('backend/temp/output.png')
+            if os.path.exists(fname_abs) and fname_abs != target_abs:
+                shutil.copyfile(fname_abs, target_abs)
+        except Exception:
+            pass
+
     plt.show = _new_plt_show
+    plt.savefig = _new_savefig
 except Exception:
     pass
 """
