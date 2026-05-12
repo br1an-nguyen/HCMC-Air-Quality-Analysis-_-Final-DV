@@ -51,7 +51,7 @@ class GoalOneConclusion:
             </h4>
             <ol style="margin-bottom: 0;">
                 {bullets_html}
-                <li><i style="color:#2E86AB; font-weight:600;">{action_line}</i></li>
+                <li>{action_line}</li>
             </ol>
         """
         render_conclusion_box(content_html, accent_color="#2E86AB")
@@ -131,9 +131,10 @@ class GoalOneConclusion:
         )
 
         action = (
-            f"Hạn chế ra đường vào <b>{peak_hour}:00</b> trong tháng <b>{peak_month_label}</b>. "
-            f"Thời điểm an toàn nhất: tháng <b>{clean_month_label}</b>, sau <b>{low_hour}:00</b> "
-            f"(PM2.5 = <b>{low_hour_val:.1f} µg/m³</b>)"
+            f"Tránh ra đường vào <b>{peak_hour}:00</b> trong các tháng mùa khô (tháng 11–4) — "
+            f"đây là khung giờ và mùa ô nhiễm nhất theo dữ liệu quan trắc. "
+            f"Thời điểm an toàn hơn: các tháng mùa mưa, sau <b>{low_hour}:00</b> "
+            f"(PM2.5 trung bình <b>{low_hour_val:.1f} µg/m³</b>)"
         )
 
         return title, [bullet_1, bullet_2, bullet_3, bullet_4], action
