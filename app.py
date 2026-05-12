@@ -93,8 +93,8 @@ pg.run()
 import os
 try:
     from dashboard.components.chat_widget import render_chat_widget
-    # Lấy backend URL từ env, mặc định 8000 (FastAPI).
-    backend_url = os.environ.get("BACKEND_URL", "http://localhost:8000")
+    # Lấy backend URL từ env, mặc định 80 (FastAPI).
+    backend_url = os.environ.get("BACKEND_URL", "http://localhost:80")
     render_chat_widget(backend_url)
 except Exception as e:
     st.error(f"Cannot load Chatbot Widget: {e}")

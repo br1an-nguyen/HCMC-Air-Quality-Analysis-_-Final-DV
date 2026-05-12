@@ -6,7 +6,7 @@ df = pd.read_csv('data/cleaned/Air_Quality_HCMC_Cleaned.csv')
 
 # Metadata trạm
 stations_meta = pd.DataFrame([
-    {'Station_No': 1, 'Location': 'VNU Linh Trung', 'Region': 'Urban background', 'Lat': 10.8699, 'Lon': 106.7960},
+    {'Station_No': 1, 'Location': 'VNU Ho Chi Minh', 'Region': 'Urban background', 'Lat': 10.8699, 'Lon': 106.7960},
     {'Station_No': 2, 'Location': 'Binh Tan', 'Region': 'Traffic', 'Lat': 10.7410, 'Lon': 106.6171},
     {'Station_No': 3, 'Location': 'Tan Binh IP', 'Region': 'Industry', 'Lat': 10.8162, 'Lon': 106.6204},
     {'Station_No': 4, 'Location': 'Thanh Da', 'Region': 'Residential', 'Lat': 10.8158, 'Lon': 106.7174},

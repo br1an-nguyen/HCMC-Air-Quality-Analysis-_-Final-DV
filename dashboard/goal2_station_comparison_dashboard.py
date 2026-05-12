@@ -17,7 +17,7 @@ def load_data():
     df['Date'] = pd.to_datetime(df['Date'])
     
     stations_meta = pd.DataFrame([
-        {'Station_No': 1, 'Region': 'Nền đô thị', 'Lat': 10.8699, 'Lon': 106.7960, 'Location': 'ĐHQG Linh Trung'},
+        {'Station_No': 1, 'Region': 'Nền đô thị', 'Lat': 10.8699, 'Lon': 106.7960, 'Location': 'ĐHQG Hồ Chí Minh'},
         {'Station_No': 2, 'Region': 'Giao thông', 'Lat': 10.7410, 'Lon': 106.6171, 'Location': 'Bình Tân'},
         {'Station_No': 3, 'Region': 'Công nghiệp', 'Lat': 10.8162, 'Lon': 106.6204, 'Location': 'KCN Tân Bình'},
         {'Station_No': 4, 'Region': 'Dân cư', 'Lat': 10.8158, 'Lon': 106.7174, 'Location': 'Thanh Đa'},
@@ -64,13 +64,13 @@ def classify_shape(percs: dict) -> str:
     if pm25_over and o3_over:
         pm25_dominance = percs['PM2.5'] / (percs['PM2.5'] + percs['O3'])
         if pm25_dominance > 0.6:
-            return f"Cả PM2.5 ({percs['PM2.5']:.0f}% WHO) lẫn O3 ({percs['O3']:.0f}% WHO) đều vượt ngưỡng, trong đó bụi mịn chiếm ưu thế hơn."
+            return f"Cả PM2.5 ({percs['PM2.5']:.0f}% WHO) lẫn O3 ({percs['O3']:.0f}% WHO) đều vượt ngưỡng, trong đó PM2.5 (bụi mịn) chiếm ưu thế hơn."
         elif pm25_dominance < 0.4:
-            return f"Cả PM2.5 ({percs['PM2.5']:.0f}% WHO) lẫn O3 ({percs['O3']:.0f}% WHO) đều vượt ngưỡng, trong đó ozone chiếm ưu thế hơn."
+            return f"Cả PM2.5 ({percs['PM2.5']:.0f}% WHO) lẫn O3 ({percs['O3']:.0f}% WHO) đều vượt ngưỡng, trong đó O3 (ozone) chiếm ưu thế hơn."
         else:
             return f"PM2.5 ({percs['PM2.5']:.0f}% WHO) và O3 ({percs['O3']:.0f}% WHO) vượt ngưỡng ở mức tương đương."
     elif pm25_over and not o3_over:
-        return f"PM2.5 ({percs['PM2.5']:.0f}% WHO) vượt ngưỡng rõ ràng. O3 nằm sát hoặc dưới ngưỡng ({percs['O3']:.0f}% WHO). Bụi mịn là mối lo trực tiếp duy nhất."
+        return f"PM2.5 ({percs['PM2.5']:.0f}% WHO) vượt ngưỡng rõ ràng. O3 nằm sát dưới ngưỡng ({percs['O3']:.0f}% WHO). PM2.5 (Bụi mịn) là mối lo chính."
     elif o3_over and not pm25_over:
         return f"O3 ({percs['O3']:.0f}% WHO) vượt ngưỡng trong khi PM2.5 ({percs['PM2.5']:.0f}% WHO) vẫn dưới mức khuyến cáo — trạm này tốt hơn về bụi nhưng xấu hơn về khí quang hóa."
     else:
@@ -96,7 +96,7 @@ def get_axis_dominance_insight(station_df, station_name, region_name):
     main_line = (
         f"<b>Độ lệch trục ({station_name}):</b> "
         f"Hình đa giác bị kéo lệch mạnh nhất về trục <b>{dominant_p}</b>, "
-        f"chiếm <b>{dom_share:.0f}%</b> tổng diện tích hiển thị (đạt <b>{capped[dominant_p]:.0f}%</b> WHO"
+        f"chiếm gần <b>{dom_share:.0f}%</b> tổng diện tích hiển thị (đạt <b>{capped[dominant_p]:.0f}%</b> WHO"
         + (f", giá trị thực = <b>{actual_val:.0f}%</b>)." if was_capped else f").")
     )
     
@@ -134,7 +134,6 @@ def get_comparative_insight(worst_row, best_row, df_daily, focus_pollutant) -> l
             f"({best_row['Location']}, {b_percs.get(focus_pollutant, 0):.0f}% WHO) lại có <b>{p}</b> "
             f"<b>cao hơn {gap:.0f} điểm %</b> so với trạm tệ nhất "
             f"({b_val:.0f}% vs {w_val:.0f}% WHO). "
-            f"Hai chất này có nguồn gốc và cơ chế khác nhau — không thể tối ưu đồng thời."
         )
 
     # Pattern 2: Dominance
@@ -156,8 +155,8 @@ def get_comparative_insight(worst_row, best_row, df_daily, focus_pollutant) -> l
     insights.append(
         f"<b>Khoảng cách định lượng:</b> "
         f"PM2.5 tại {worst_row['Location']} cao hơn {best_row['Location']} "
-        f"<b>{gap_val:.1f} µg/m³ (+{pm25_gap:.0f} điểm %)</b>. "
-        + (f"Ngược lại, O3 tại {best_row['Location']} cao hơn {o3_gap:.0f} điểm % — trục O3 phản ánh trạng thái ô nhiễm khí quang hóa cao hơn tại khu vực này."
+        f"<b>{gap_val:.1f} µg/m³ (+{pm25_gap:.0f}% )</b>. "
+        + (f"Ngược lại, O3 tại {best_row['Location']} cao hơn {o3_gap:.0f}% — trục O3 phản ánh trạng thái ô nhiễm khí quang hóa cao hơn tại khu vực này."
            if o3_gap > 5 else "O3 ở cả hai trạm ở mức tương đương.")
     )
     
@@ -418,7 +417,7 @@ def main():
 
     with st.container(border=True):
         # --- PHẦN 1: XỬ LÝ DỮ LIỆU (TỪ CODE GỐC CỦA BẠN) ---
-        pollutants_to_plot = ['PM2.5', 'TSP', 'CO', 'NO2', 'O3', 'SO2']
+        pollutants_to_plot = ['PM2.5', 'TSP', 'CO', 'O3']
         valid_pollutants = [p for p in pollutants_to_plot if p in df_filtered.columns]
         
         mean_data = []
@@ -439,8 +438,7 @@ def main():
             lambda row: (row['Concentration'] / THRESHOLDS.get(row['Pollutant'], 1)) * 100, axis=1
         )
 
-        # --- PHẦN 2: CHỈNH SỬA TRỰC QUAN ---
-        
+       
         # 1. Sắp xếp (Sort) dữ liệu trước khi vẽ để các thanh bar hiển thị có thứ tự (Gestalt Principle)
         df_region_melt = df_region_melt.sort_values(by=['Region', 'Percent_WHO'], ascending=[True, True])
         
@@ -455,7 +453,7 @@ def main():
             color_discrete_map=COLOR_MAP, # Áp dụng bảng màu chuẩn
             orientation='h',
             title="Hồ Sơ Ô Nhiễm Theo Khu Vực (% WHO)<br>",
-            labels={'Percent_WHO': '% WHO', 'Pollutant': 'Chất Ô Nhiễm'},
+            labels={'Percent_WHO': '% WHO', 'Pollutant': 'Chất Ô Nhiễm', 'Region': 'Khu vực'},
             hover_data={'Concentration': ':.1f'}
         )
         
@@ -478,7 +476,7 @@ def main():
             bgcolor="rgba(255, 255, 255, 0.85)",
             bordercolor="#D9E4EC",
             borderpad=3,
-            yshift=15
+            yshift=-15
         )
     )
         
@@ -537,8 +535,8 @@ def main():
         dominant_insight = (
             "<b>Phân hóa theo khu vực (Facet Bar):</b> Hồ sơ ô nhiễm phân hóa rõ theo đặc trưng khu vực: "
             "PM2.5 là chất chiếm tỷ trọng cao nhất tại khu Dân cư (162% WHO) và Công nghiệp (137% WHO). "
-            "O3 chiếm ưu thế tại khu Giao thông (137%) và Nền đô thị (133%)."
-            "Không có khu vực nào có hồ sơ an toàn toàn diện."
+            "O3 chiếm ưu thế tại khu Giao thông (137%) và Nền đô thị (133%). "
+            "Không có khu vực nào có trạng thái an toàn ở mức toàn diện."
         )
 
         # Insight 2: Volatility (Box Plot)
@@ -552,10 +550,10 @@ def main():
             
             if focus_pollutant == 'PM2.5':
                 boxplot_insight = (
-                    "<b>Độ biến động (Box plot):</b> KCN Tân Bình có IQR lớn nhất (14.6 µg/m³) — gấp 2.0 lần Quận 3 (7.2 µg/m³) — "
+                    "<b>Độ biến động (Box plot):</b> KCN Tân Bình có IQR lớn nhất (14.6 µg/m³) — gấp hơn 2 lần Quận 3 (7.2 µg/m³) — "
                     "cho thấy mức độ biến động ngày rất cao, phù hợp với tính chất hoạt động công nghiệp không đều. "
                     "Thanh Đa dù có median cao nhất (24.3 µg/m³) nhưng IQR chỉ 13.6 µg/m³, nghĩa là ô nhiễm cao và ổn định — "
-                    "mức nền cao liên tục chứ không phải spike ngắn hạn."
+                    "mức nền cao liên tục chứ không phải đột biến ngắn hạn."
                 )
             else:
                 ratio = (max_iqr_val / min_iqr_val) if min_iqr_val > 0 else 0
@@ -569,7 +567,7 @@ def main():
         render_insight_box([dominant_insight, boxplot_insight])
 
         st.markdown("---")
-        render_section_header("Profile Ô Nhiễm Đa Chiều Theo Trạm (% WHO)")
+        render_section_header("Ô Nhiễm Đa Chiều Theo Trạm Thấp nhất - Cao nhất (% WHO)")
 
         col_radar_title, col_radar_toggle = st.columns([7, 3])
         with col_radar_toggle:
@@ -579,7 +577,6 @@ def main():
                 help="Tắt: Ép trục ở mức 200% để hình dáng không bị bẹp. Bật: Scale theo tỷ lệ thực tế cao nhất."
             )
 
-        # Chỉ sử dụng 4 trục đáng tin cậy
         categories = ['PM2.5', 'TSP', 'CO', 'O3']
         thresholds_radar = THRESHOLDS
 
@@ -614,7 +611,6 @@ def main():
                 val_perc = (v / thresholds_radar.get(p, 1)) * 100 if pd.notna(v) else 0
                 uncapped_values.append(val_perc)
                 
-                # Kỹ thuật Cap & Annotate: Ép đỉnh ở 200% nhưng bắn text báo số thật (nếu tắt auto_scale)
                 capped_val = val_perc if auto_scale else min(val_perc, 200)
                 values.append(capped_val)
                 
@@ -625,7 +621,7 @@ def main():
                         mode='text',
                         text=[f" ⚠️ {val_perc:.0f}% "],
                         textposition="top right",
-                        textfont=dict(color="#E63946", size=11, weight="bold"),
+                        textfont=dict(color="#E63946", size=15, weight="bold"),
                         showlegend=False,
                         hoverinfo='none'
                     ))
@@ -656,7 +652,6 @@ def main():
             margin=dict(t=30, b=30, l=30, r=30)
         )
 
-        # Lưu ý về SO2/NO2 đã được gỡ bỏ khỏi Radar Chart do anomaly.
 
         st.plotly_chart(fig_radar, use_container_width=True)
 
@@ -754,7 +749,7 @@ def main():
             # Display Text Insight
             if focus_pollutant in ['PM2.5', 'O3']:
                 render_insight_box([
-                    "<b>PM2.5:</b> Chỉ 2/6 trạm có nồng độ đêm cao hơn ngày (KCN Tân Bình, Linh Trung). 4 trạm còn lại tuân theo quy luật ngày > đêm, nhất quán với nguồn phát thải giao thông.",
+                    "<b>PM2.5:</b> Chỉ 2/6 trạm có nồng độ đêm cao hơn ngày (KCN Tân Bình, ĐHQG Hồ Chí Minh). 4 trạm còn lại tuân theo quy luật ngày > đêm, nhất quán với nguồn phát thải giao thông.",
                     "<b>O3:</b> 4/6 trạm có O3 đêm cao hơn ngày, phản ánh sự tích lũy O3 kéo dài sau khi quá trình quang hóa ban ngày dừng."
                 ], title="Chu kỳ Ngày / Đêm (Đặc trưng PM2.5 & O3)", icon_name="trend")
             elif night_higher_stations:
@@ -785,10 +780,10 @@ def main():
                         <b>Về biến động nội tại:</b> KCN Tân Bình có IQR PM2.5 lớn nhất (14.6 µg/m³), trong khi Thanh Đa mặc dù có median cao nhất nhưng biến động thấp hơn (IQR = 13.6 µg/m³) — mức ô nhiễm cao nhưng liên tục, không phải theo đợt.
                     </li>
                     <li>
-                        <b>Về chu kỳ ngày-đêm:</b> 4/6 trạm có PM2.5 cao hơn ban ngày, nhất quán với nguồn phát thải giao thông. 2 trạm ngoại lệ (KCN Tân Bình và Linh Trung) có PM2.5 đêm cao hơn ngày với biên độ nhỏ (0.6–1.2 µg/m³).
+                        <b>Về chu kỳ ngày-đêm:</b> 4/6 trạm có PM2.5 cao hơn ban ngày. 2 trạm ngoại lệ (KCN Tân Bình và ĐHQG Hồ Chí Minh) có PM2.5 đêm cao hơn ngày với biên độ nhỏ (0.6–1.2 µg/m³). Đối với O3, 4/6 trạm đều có O3 cao hơn vào ban ngày.
                     </li>
                     <li>
-                        <b>Hệ quả cho can thiệp theo không gian:</b> Không tồn tại một chiến lược đơn lẻ phù hợp với toàn bộ 6 trạm. Nếu ưu tiên PM2.5, Thanh Đa cần can thiệp trước. Nếu ưu tiên O3, Bình Tân và Linh Trung cần ưu tiên. Nếu ưu tiên tính ổn định cao của mức ô nhiễm (không phải đỉnh ngắn hạn), Thanh Đa vẫn là đối tượng quan trọng nhất. <i>(Lưu ý: Dữ liệu SO2 và NO2 toàn mạng bị loại trừ khỏi phân tích định lượng do anomaly thiết bị đo nghiêm trọng.)</i>
+                        <b>Hệ quả cho can thiệp theo không gian:</b> Không tồn tại một chiến lược đơn lẻ phù hợp với toàn bộ 6 trạm. Nếu ưu tiên PM2.5, Thanh Đa cần can thiệp trước. Nếu ưu tiên O3, Bình Tân và ĐHQG Hồ Chí Minh cần ưu tiên. Nếu ưu tiên tính ổn định cao của mức ô nhiễm (không phải đỉnh ngắn hạn), Thanh Đa vẫn là đối tượng quan trọng nhất.
                     </li>
                 </ul>
             """

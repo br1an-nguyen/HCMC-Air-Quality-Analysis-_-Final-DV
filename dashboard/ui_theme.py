@@ -56,12 +56,12 @@ def base_layout(**overrides) -> dict:
     defaults = dict(
         plot_bgcolor=CARD_BG,
         paper_bgcolor=CARD_BG,
-        font=dict(family=FONT_FAMILY, color=TEXT_PRIMARY, size=12),
+        font=dict(family=FONT_FAMILY, color=TEXT_PRIMARY, size=16),
         xaxis=dict(gridcolor=GRIDLINE, showgrid=True, zeroline=False),
         yaxis=dict(gridcolor=GRIDLINE, showgrid=True, zeroline=False),
         margin=dict(l=55, r=30, t=65, b=50),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        hoverlabel=dict(bgcolor=CARD_BG, font_size=12),
+        hoverlabel=dict(bgcolor=CARD_BG, font_size=16),
     )
     defaults.update(overrides)
     return defaults
@@ -91,6 +91,7 @@ def inject_global_css() -> None:
     .stApp {{
         background-color: {CANVAS_BG};
         font-family: {FONT_FAMILY};
+        font-size: 18px;
     }}
 
     /* ── Sidebar ── */
@@ -137,7 +138,7 @@ def inject_global_css() -> None:
         background-color: {TEXT_PRIMARY} !important;
         color: #FFFFFF !important;
         border-radius: 6px !important;
-        font-size: 12px !important;
+        font-size: 16px !important;
     }}
     span[data-baseweb="tag"] span {{
         color: #FFFFFF !important;
@@ -153,20 +154,20 @@ def inject_global_css() -> None:
 
     /* ── Headers ── */
     h3[data-testid="stHeader"] {{
-        font-size: 30px !important;
+        font-size: 34px !important;
         font-weight: 700 !important;
         color: {TEXT_PRIMARY} !important;
         margin-bottom: 0.5rem !important;
     }}
     .section-header-main {{
-        font-size: 30px;
+        font-size: 34px;
         font-weight: 700;
         color: {TEXT_PRIMARY};
         margin-bottom: 0.5rem;
         margin-top: 1.5rem;
     }}
     .section-header-insight {{
-        font-size: 16px;
+        font-size: 20px;
         font-weight: 700;
         color: {TEXT_PRIMARY};
         margin-bottom: 0.5rem;
@@ -186,7 +187,7 @@ def inject_global_css() -> None:
     }}
     div[data-testid="stMetric"] label {{
         color: {TEXT_SECONDARY};
-        font-size: 13px;
+        font-size: 17px;
         font-weight: 500;
         margin-bottom: 0px !important;
         min-height: 24px;
@@ -194,7 +195,7 @@ def inject_global_css() -> None:
         align-items: flex-start;
     }}
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
-        font-size: 26px;
+        font-size: 30px;
         font-weight: 700;
         color: {TEXT_PRIMARY};
         min-height: 36px;
@@ -256,13 +257,13 @@ def inject_global_css() -> None:
         color: #1E88E5;
         font-weight: 700;
         margin-bottom: 6px;
-        font-size: 13px;
+        font-size: 17px;
     }}
     .insight-box ul {{
         margin: 0;
         padding-left: 18px;
         color: {TEXT_PRIMARY};
-        font-size: 13.5px;
+        font-size: 17.5px;
         line-height: 1.7;
     }}
 
@@ -304,12 +305,12 @@ def render_page_header(title: str, subtitle: str = "") -> None:
     Render tiêu đề trang nhất quán trong một khối HTML duy nhất
     để tránh bị nhảy (jump) giao diện khi chuyển trang.
     """
-    sub_html = f"<p style='margin:0; color:{TEXT_SECONDARY}; font-size:14px;'>{subtitle}</p>" if subtitle else ""
+    sub_html = f"<p style='margin:0; color:{TEXT_SECONDARY}; font-size:18px;'>{subtitle}</p>" if subtitle else ""
     st.markdown(
         f"""
         <div style='margin-bottom:25px;'>
             <h1 style='color:{TEXT_PRIMARY}; font-family:{FONT_FAMILY};
-                       margin:0 0 4px 0; font-size:36px; font-weight:700;
+                       margin:0 0 4px 0; font-size:40px; font-weight:700;
                        line-height:1.2;'>
                 {title}
             </h1>
@@ -326,7 +327,7 @@ def render_sidebar_header(label: str = "Bộ lọc dữ liệu") -> None:
     st.sidebar.markdown(
         f"<div style='background:{TEXT_PRIMARY};border-radius:8px;"
         f"padding:10px 14px;margin-bottom:14px;'>"
-        f"<span style='color:white;font-size:13px;font-weight:700;'>{label}</span>"
+        f"<span style='color:white;font-size:17px;font-weight:700;'>{label}</span>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -440,7 +441,7 @@ def render_standard_sidebar(
         st.markdown(
             f"<div style='background:{TEXT_PRIMARY};border-radius:8px;"
             f"padding:10px 14px;margin-bottom:16px;'>"
-            f"<span style='color:white;font-size:13px;font-weight:700;'>"
+            f"<span style='color:white;font-size:17px;font-weight:700;'>"
             f"Bộ lọc dữ liệu</span></div>",
             unsafe_allow_html=True,
         )
