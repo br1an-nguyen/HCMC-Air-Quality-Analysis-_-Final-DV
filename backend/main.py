@@ -8,6 +8,7 @@ import uuid
 
 import pandas as pd
 import google.generativeai as genai
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -19,12 +20,12 @@ try:
 except ImportError:
     import database
 
-
 # ─────────────────────────────────────────────────────────────
 # App & environment setup
 # ─────────────────────────────────────────────────────────────
 
-load_dotenv()  # called ONCE — duplicate removed
+load_dotenv()
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 app = FastAPI(title="HCMC Air Quality AI API", version="2.0.0")
 
@@ -57,7 +58,7 @@ app.mount("/charts", StaticFiles(directory=TEMP_DIR), name="charts")
 
 # Model name — đổi tại đây nếu muốn dùng model khác.
 # gemini-1.5-flash: free tier quota cao hơn gemini-2.0-flash-lite
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 api_key = os.environ.get("GOOGLE_API_KEY", "")
 if api_key:
@@ -89,7 +90,7 @@ def startup_event() -> None:
     # This makes context attachment automatic — the frontend does not need to
     # send anything in the `context` field for basic schema awareness.
     global AUTO_CONTEXT
-    csv_path = "data/cleaned/Air_Quality_HCMC_Cleaned.csv"
+    csv_path = os.path.join(project_root, "data", "cleaned", "Air_Quality_HCMC_Cleaned.csv")
     try:
         df = pd.read_csv(csv_path, nrows=5)          # read only 5 rows for speed
         full_df = pd.read_csv(csv_path, usecols=["Date", "Station_No"])
@@ -140,7 +141,7 @@ SCHEMA CÁC CỘT:
 METADATA 6 TRẠM QUAN TRẮC:
 | Station_No | Location        | Region                | Lat      | Lon       |
 |------------|-----------------|-----------------------|----------|-----------|
-| 1          | VNU Linh Trung  | Urban background      | 10.8699  | 106.7960  |
+| 1          | VNU Ho Chi Minh | Urban background      | 10.8699  | 106.7960  |
 | 2          | Binh Tan        | Traffic               | 10.7410  | 106.6171  |
 | 3          | Tan Binh IP     | Industry              | 10.8162  | 106.6204  |
 | 4          | Thanh Da        | Residential           | 10.8158  | 106.7174  |
@@ -217,7 +218,11 @@ GOAL 5 — RỦI RO SỨC KHỎE
 PHẦN V — LUẬT KỸ THUẬT BẮT BUỘC CHO CODE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1. ĐỌC DỮ LIỆU : 'data/cleaned/Air_Quality_HCMC_Cleaned.csv'
+1. ĐỌC DỮ LIỆU : Sử dụng đường dẫn tuyệt đối hoặc tương ứng với ROOT. 
+                  Gợi ý code: 
+                  import os
+                  root = os.getcwd() # Hoặc logic phù hợp
+                  path = 'data/cleaned/Air_Quality_HCMC_Cleaned.csv'
 2. LỌC FLAG    : df[df['col_flag'] <= 1] — bắt buộc trước mọi tính toán
 3. PLOTLY      : ưu tiên Plotly. KẾT THÚC BẰNG fig.write_html('backend/temp/output.html').
                  TUYỆT ĐỐI KHÔNG DÙNG fig.show() — code chạy trong server subprocess.

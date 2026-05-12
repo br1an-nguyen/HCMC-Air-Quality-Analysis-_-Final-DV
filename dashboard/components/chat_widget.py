@@ -298,6 +298,7 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                 background: rgba(0, 0, 0, 0.5); z-index: 2000;
                 display: none; align-items: center; justify-content: center;
                 backdrop-filter: blur(3px);
+                pointer-events: auto;
             }}
             #code-modal {{
                 background: #1E1E1E; width: 95%; height: 92%;
@@ -434,7 +435,7 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                                     analysis_script.py
                                 </div>
                                 <div style="flex:1; display:flex; justify-content: flex-end; align-items:center; padding-right:15px;">
-                                    <button class="run-button" id="btn-run-code">
+                                    <button class="run-button" id="btn-run-code" onclick="runCodeFromEditor()">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
                                         Run Python
                                     </button>
@@ -643,16 +644,13 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
                                     Yêu cầu phê duyệt
                                 </div>
-                                <div style="color:#57534E;">Mã phân tích dữ liệu đã được tạo. Vui lòng duyệt để chạy kết quả biểu đồ.</div>
+                                <div style="color:#57534E;">Mã phân tích dữ liệu đã được tạo. Vui lòng duyệt để chạy kết quả.</div>
                                 <div class="card-actions" style="flex-direction: column;">
-                                    <button class="approve-btn" style="background:#2B7BBB; display:flex; justify-content:center; align-items:center; gap:6px;" onclick="openCodeModal('${{data.chat_id}}', '${{cardId}}')">
+                                    <button class="approve-btn" style="display:flex; justify-content:center; align-items:center; gap:6px;" onclick="openCodeModal('${{data.chat_id}}', '${{cardId}}')">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                                         Xem & Chỉnh sửa Mã (Review)
                                     </button>
-                                    <div style="display: flex; gap: 8px;">
-                                        <button class="approve-btn" onclick="executeCode('${{data.chat_id}}', '${{cardId}}')">✅ Chạy Nhanh</button>
-                                        <button class="reject-btn" onclick="rejectCode('${{cardId}}')">❌ Bỏ Qua</button>
-                                    </div>
+                                    <button class="reject-btn" onclick="rejectCode('${{cardId}}')">❌ Bỏ Qua</button>
                                 </div>
                             </div>
                         `;
@@ -682,10 +680,10 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
             let currentEditingCardId = null;
 
             // --- Fullscreen Expansion Logic ---
-            function setIframeFullscreen(isFullscreen) {{
+            function setIframeFullscreen(isFullscreen, elementId = 'code-modal') {{
                 try {{
-                    const el = document.getElementById('code-modal');
-                    if (isFullscreen) {{
+                    const el = document.getElementById(elementId);
+                    if (isFullscreen && el) {{
                         if (el.requestFullscreen) {{
                             el.requestFullscreen().catch(e => console.log(e));
                         }} else if (el.webkitRequestFullscreen) {{
@@ -708,9 +706,11 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                         }}
                         
                         // Phục hồi CSS tĩnh
-                        el.style.width = '95%';
-                        el.style.height = '92%';
-                        el.style.borderRadius = '8px';
+                        if (el) {{
+                            el.style.width = elementId === 'code-modal' ? '95%' : '92vw';
+                            el.style.height = elementId === 'code-modal' ? '92%' : '90vh';
+                            el.style.borderRadius = elementId === 'code-modal' ? '8px' : '12px';
+                        }}
                     }}
                 }} catch(e) {{
                     console.log("Fullscreen API error", e);
@@ -723,24 +723,24 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                 const codeStr = codesMap[chatId] || "";
                 document.getElementById('code-textarea').value = codeStr;
                 document.getElementById('code-modal-overlay').style.display = 'flex';
-                setIframeFullscreen(true);
+                setIframeFullscreen(true, 'code-modal');
             }};
 
             window.closeCodeModal = function() {{
                 document.getElementById('code-modal-overlay').style.display = 'none';
                 currentEditingChatId = null;
                 currentEditingCardId = null;
-                setIframeFullscreen(false);
+                setIframeFullscreen(false, 'code-modal');
             }};
 
-            document.getElementById('btn-run-code').addEventListener('click', () => {{
+            window.runCodeFromEditor = function() {{
                 if (currentEditingChatId && currentEditingCardId) {{
                     codesMap[currentEditingChatId] = document.getElementById('code-textarea').value;
                     saveState();
                     closeCodeModal();
                     executeCode(currentEditingChatId, currentEditingCardId);
                 }}
-            }});
+            }};
             // -------------------------
 
             // --- Viewer Modal Logic ---
@@ -753,11 +753,13 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                     body.innerHTML = `<img src="${{url}}" alt="chart" />`;
                 }}
                 overlay.style.display = 'flex';
+                setIframeFullscreen(true, 'viewer-modal');
             }};
 
             window.closeViewerModal = function() {{
                 document.getElementById('viewer-modal-overlay').style.display = 'none';
                 document.getElementById('viewer-modal-body').innerHTML = '';
+                setIframeFullscreen(false, 'viewer-modal');
             }};
 
             window.handleViewerOverlayClick = function(e) {{
