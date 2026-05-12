@@ -35,11 +35,11 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
                must have pointer-events: auto.
             */
             body {{
-                margin: 0; padding: 0;
-                font-family: 'Segoe UI', Inter, Roboto, sans-serif;
-                pointer-events: none; /* Let clicks pass through */
-                background: transparent !important;
-            }}
+                        margin: 0; padding: 0;
+                        font-family: 'Segoe UI', Inter, Roboto, sans-serif;
+                        pointer-events: auto; /* allow interactions inside widget */
+                        background: transparent !important;
+                    }}
             
             /* -- THE LAUNCHER (Chat Head) -- */
             #chat-launcher {{
@@ -222,7 +222,7 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
             }}
             .chat-chart-iframe {{
                 width: 100%; height: 260px; border: none; border-radius: 8px;
-                pointer-events: none; /* prevent iframe stealing clicks */
+                pointer-events: auto; /* allow clicking the iframe preview */
             }}
 
             /* -- Chart thumbnail wrapper -- */
@@ -249,6 +249,9 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
             .chat-chart-thumb:hover .btn-view-full {{
                 opacity: 1; transform: scale(1);
             }}
+
+            /* Ensure the widget iframe placed by Streamlit accepts pointer events */
+            iframe[title="st.iframe"] {{ pointer-events: auto !important; z-index: 2000 !important; }}
 
             /* -- Viewer Modal -- */
             #viewer-modal-overlay {{
@@ -735,10 +738,13 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
 
             window.runCodeFromEditor = function() {{
                 if (currentEditingChatId && currentEditingCardId) {{
-                    codesMap[currentEditingChatId] = document.getElementById('code-textarea').value;
+                    // Capture IDs before closing modal because closeCodeModal() clears them
+                    const chatIdToRun = currentEditingChatId;
+                    const cardIdToRun = currentEditingCardId;
+                    codesMap[chatIdToRun] = document.getElementById('code-textarea').value;
                     saveState();
                     closeCodeModal();
-                    executeCode(currentEditingChatId, currentEditingCardId);
+                    executeCode(chatIdToRun, cardIdToRun);
                 }}
             }};
             // -------------------------
@@ -882,16 +888,34 @@ def render_chat_widget(backend_url: str = "http://localhost:8080"):
     st.markdown(
         """
         <style>
-            iframe[title="st.iframe"] {
+            /* Ensure widget iframe is on top and receives pointer events */
+            iframe[title^="st."] , iframe[title="st.iframe"], iframe[srcdoc] {
                 position: fixed !important;
                 right: 20px !important;
                 bottom: 20px !important;
                 width: 400px !important;
                 height: 650px !important;
-                z-index: 1000 !important;
+                z-index: 99999 !important;
                 border: none !important;
+                pointer-events: auto !important;
             }
+
+            /* Also make sure any overlay elements from Streamlit don't block clicks */
+            .stApp, .main, .block-container { pointer-events: auto !important; }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Small debug helper: inject script that logs clicks inside the widget iframe
+    st.markdown(
+        """
+        <script>
+        try {
+            // Post a message to the iframe itself for internal debug prints
+            console.log('Chat widget CSS injection complete');
+        } catch(e) { console.log('chat widget debug injection failed', e); }
+        </script>
         """,
         unsafe_allow_html=True,
     )
